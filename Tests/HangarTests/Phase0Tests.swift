@@ -94,33 +94,51 @@ struct ArrayColumnRendererTests {
 
 // MARK: - Integration
 
-extension PostgresIntegrationSuite {
-    @Suite("Phase 0 — bulk delete and array columns (real Postgres)")
+// Sandboxed (testing plan, Phase 3). Two shapes needed scoping, and the bulk
+// delete is the more serious of the two: a *write* whose whole assertion is "it
+// touched exactly the matching rows". `Post.where { $0.published == false }`
+// under `withRepo` meant "the one unpublished row this test made"; in a sandbox
+// it means every unpublished post anybody has committed, so `removed` would stop
+// being 1. It is now scoped to a fresh owner UUID stamped on all six rows, which
+// keeps the predicate (`published == false`) doing the selecting. The array
+// read-back is scoped to the two ids it inserted, in the same `id.asc()` order.
+extension SandboxedIntegrationSuite {
+    @Suite("Phase 0 — bulk delete and array columns (real Postgres, sandboxed)")
     struct Phase0IntegrationTests {
 
         @Test("bulk delete removes exactly the matching rows and reports the count")
         func bulkDelete() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
+                // One fresh owner across all six rows, so the delete's blast
+                // radius is this test's rows and nothing else committed.
+                let owner = UUID()
                 for i in 1...5 {
-                    try await repo.insert(Post.sample(title: "keep-\(i)"))
+                    var keep = Post.sample(title: "keep-\(i)")
+                    keep.authorID = owner
+                    try await repo.insert(keep)
                 }
                 var doomed = Post.sample(title: "doomed")
                 doomed.published = false
+                doomed.authorID = owner
                 try await repo.insert(doomed)
 
-                let removed = try await repo.delete(Post.where { $0.published == false })
+                let removed = try await repo.delete(
+                    Post.where { $0.authorID == owner && $0.published == false })
                 #expect(removed == 1)
-                #expect(try await repo.count(Post.all) == 5)
+                // The five published rows survived — `published == false` is
+                // still what decided which row went.
+                #expect(try await repo.count(Post.where { $0.authorID == owner }) == 5)
 
                 // Nothing matched: zero is an answer, not an error.
-                let none = try await repo.delete(Post.where { $0.published == false })
+                let none = try await repo.delete(
+                    Post.where { $0.authorID == owner && $0.published == false })
                 #expect(none == 0)
             }
         }
 
         @Test("array columns round-trip, including the empty array")
         func arrayRoundTrip() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let stored = try await repo.insert(
                     Tagged(name: "full", labels: ["swift", "postgres"], scores: [7, 11]))
                 #expect(stored.labels == ["swift", "postgres"])
@@ -130,7 +148,10 @@ extension PostgresIntegrationSuite {
                 #expect(empty.labels.isEmpty)
                 #expect(empty.scores.isEmpty)
 
-                let fetched = try await repo.all(Tagged.all.order { $0.id.asc() })
+                // Scoped to the two rows just inserted; ascending id still puts
+                // "full" before "empty", so the pair of arrays is unchanged.
+                let fetched = try await repo.all(
+                    Tagged.where { $0.id.in([stored.id, empty.id]) }.order { $0.id.asc() })
                 #expect(fetched.map(\.labels) == [["swift", "postgres"], []])
 
                 // Arrays update like any other column.
@@ -173,13 +194,22 @@ struct MultiValuesThrowingTests {
     }
 }
 
-extension PostgresIntegrationSuite {
-    @Suite("Multi — step misuse fails the transaction, not the process")
+// Sandboxed (testing plan, Phase 3). Safe despite being a rollback test: the
+// step fails with a client-side `HangarError` (a missing `MultiValues` key), not
+// a server error, so the sandbox transaction is never poisoned — and `Multi.run`
+// calls `repo.transaction`, which at sandbox depth 1 renders as
+// `SAVEPOINT`/`ROLLBACK TO`, so the insert is still genuinely rolled back. The
+// rollback proof itself needed scoping: `count(Post.all) == 0` was only ever
+// "nothing at all in an empty table". It now counts rows carrying the title the
+// rolled-back step tried to write, the same shape `ChangesetIntegrationTests`
+// uses, which is a sharper statement of the claim.
+extension SandboxedIntegrationSuite {
+    @Suite("Multi — step misuse fails the transaction, not the process (sandboxed)")
     struct MultiMisuseIntegrationTests {
 
         @Test("a step reading an unknown key rolls back and reports through .failure")
         func unknownKeyBecomesStepFailure() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let multi = Multi()
                     .insert(MultiKey<Post>("post"), postChangeset(title: "will roll back"))
                     .run { values in
@@ -190,8 +220,10 @@ extension PostgresIntegrationSuite {
                     Issue.record("expected the misreading step to fail the Multi")
                 case .failure(let failure):
                     #expect(failure.error is HangarError)
-                    // The insert before it was rolled back with everything else.
-                    #expect(try await repo.count(Post.all) == 0)
+                    // The insert before it was rolled back with everything else:
+                    // scoped to the title that step tried to write, because a
+                    // sandbox sees committed rows from every other suite.
+                    #expect(try await repo.count(Post.where { $0.title == "will roll back" }) == 0)
                 }
             }
         }
@@ -242,32 +274,53 @@ struct BulkUpdateRendererTests {
     }
 }
 
-extension PostgresIntegrationSuite {
-    @Suite("Bulk update (real Postgres)")
+// Sandboxed (testing plan, Phase 3). Both tests are bulk *writes* over
+// `Post.where { ... }` / `Post.all`, so scoping is not cosmetic here: unscoped,
+// `update(Post.all)` would rewrite every committed post in the table and report
+// their count instead of 1, and `update(Post.where { $0.published == false })`
+// would report every unpublished row anybody left behind instead of 3. Both are
+// now scoped to rows the test created — a fresh owner UUID where the claim is
+// about a set of rows and a predicate has to split them, the primary key where
+// the test made exactly one row. `one(Post.all)` became `one` by id for the same
+// reason: in a sandbox it would have thrown `tooManyRows`.
+extension SandboxedIntegrationSuite {
+    @Suite("Bulk update (real Postgres, sandboxed)")
     struct BulkUpdateIntegrationTests {
 
         @Test("one statement writes the matching rows and reports the count")
         func bulkUpdate() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
+                let owner = UUID()
                 for i in 1...3 {
                     var draft = Post.sample(title: "draft-\(i)")
                     draft.published = false
+                    draft.authorID = owner
                     try await repo.insert(draft)
                 }
-                try await repo.insert(Post.sample(title: "already-live"))
+                var live = Post.sample(title: "already-live")
+                live.authorID = owner
+                try await repo.insert(live)
 
-                let published = try await repo.update(Post.where { $0.published == false }) {
+                // `published == false` still picks 3 of these 4 rows; the owner
+                // only bounds the statement to this test's four.
+                let published = try await repo.update(
+                    Post.where { $0.authorID == owner && $0.published == false }
+                ) {
                     ($0.published.set(to: true), $0.nickname.set(to: "batch"))
                 }
                 #expect(published == 3)
-                #expect(try await repo.count(Post.where { $0.published == false }) == 0)
+                #expect(
+                    try await repo.count(
+                        Post.where { $0.authorID == owner && $0.published == false }) == 0)
 
                 // The already-published row was outside the predicate: untouched.
-                let untouched = try await repo.one(Post.where { $0.title == "already-live" })
+                let untouched = try await repo.one(Post.where { $0.id == live.id })
                 #expect(untouched?.nickname != "batch")
 
                 // Zero matches is an answer, not an error.
-                let none = try await repo.update(Post.where { $0.title == "no-such" }) {
+                let none = try await repo.update(
+                    Post.where { $0.authorID == owner && $0.title == "no-such" }
+                ) {
                     ($0.published.set(to: false))
                 }
                 #expect(none == 0)
@@ -276,13 +329,14 @@ extension PostgresIntegrationSuite {
 
         @Test("arity 1: a single assignment needs no tuple ceremony")
         func singleAssignment() async throws {
-            try await withRepo { repo in
-                try await repo.insert(Post.sample(title: "solo"))
-                let count = try await repo.update(Post.all) {
+            try await withSandbox { repo in
+                let solo = Post.sample(title: "solo")
+                try await repo.insert(solo)
+                let count = try await repo.update(Post.where { $0.id == solo.id }) {
                     $0.nickname.set(to: nil)
                 }
                 #expect(count == 1)
-                let row = try await repo.one(Post.all)
+                let row = try await repo.one(Post.where { $0.id == solo.id })
                 #expect(row?.nickname == nil)
             }
         }
@@ -306,6 +360,20 @@ struct BatchInsertRendererTests {
     }
 }
 
+// Deliberately NOT sandboxed (testing plan, Phase 3), and this one is not about
+// scoping. `batchIsAtomic` provokes a real **server** error — a unique-constraint
+// violation — and then keeps querying. Inside an explicit transaction Postgres
+// puts the whole transaction into the aborted state after any failed statement
+// (SQLSTATE 25P02: "current transaction is aborted, commands ignored until end of
+// transaction block"), so the `count(KV.all)` that proves nothing survived the
+// batch would not return 1 — it would throw. `repo.insert([models])` is one
+// statement with no savepoint around it, so there is nothing to catch the abort.
+//
+// Wrapping the failing insert in `repo.transaction { }` would make it survivable
+// in a sandbox, but it would also change what the test proves: single-*statement*
+// atomicity becomes savepoint rollback. `withRepo` is therefore the right home
+// for this suite, and `batchInsert` stays with it rather than being split off for
+// the sake of one lane.
 extension PostgresIntegrationSuite {
     @Suite("Batch insert (real Postgres)")
     struct BatchInsertIntegrationTests {

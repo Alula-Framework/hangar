@@ -124,27 +124,57 @@ struct UpsertRendererTests {
     }
 }
 
-extension PostgresIntegrationSuite {
-@Suite(
-    "Projections, aggregates, upsert (real Postgres)",
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+// Sandboxed (testing plan, Phase 3). This suite was the most truncation-dependent
+// of the lot: almost every assertion is an aggregate or a projection over
+// `Post.all`/`KV.all` compared to an exact value, which is only "the rows this
+// test inserted" while `withRepo` wipes the table first. A sandbox truncates
+// nothing and sees every committed row, so:
+//
+// - every post-backed test now seeds its rows under one freshly generated
+//   `authorID` and scopes its queries to that owner. GROUP BY is the sharpest
+//   case: an unscoped `groupBy { $0.authorID }` returns one row *per author in
+//   the table*, so `totals.count == 1` and the `select(into:)` equality were both
+//   at the mercy of whatever else had committed.
+// - the two upsert tests use a unique conflict key. `hangar_kv.key` is UNIQUE and
+//   `TransactionFeatureTests`/`Phase0Tests` leave committed rows behind, so a
+//   hardcoded "color" could collide with a *pre-existing* row and make the first
+//   insert update that instead of inserting — a different test entirely.
+//
+// Every scope is a strict addition to the predicate under test; the rows that
+// each assertion was distinguishing between are all still in scope, so nothing
+// here became vacuous. (Generated `KV.id` values are never asserted absolutely,
+// only compared to each other, which rollback-unsafe sequences still permit.)
+extension SandboxedIntegrationSuite {
+@Suite("Projections, aggregates, upsert (real Postgres, sandboxed)")
 struct ProjectionIntegrationTests {
 
     @Test("single-column and tuple projections decode typed")
     func typedProjections() async throws {
-        try await withRepo { repo in
-            let post = try await repo.insert(Post.sample(title: "projected", viewCount: 7))
-            _ = try await repo.insert(Post.sample(title: "other", published: false, viewCount: 3))
+        try await withSandbox { repo in
+            // One owner for both rows, so "the published one" and "both, ordered
+            // by views" can be asked without the rest of the table joining in.
+            let owner = UUID()
+            var published = Post.sample(title: "projected", viewCount: 7)
+            published.authorID = owner
+            var unpublished = Post.sample(title: "other", published: false, viewCount: 3)
+            unpublished.authorID = owner
+            let post = try await repo.insert(published)
+            _ = try await repo.insert(unpublished)
 
-            let ids: [UUID] = try await repo.all(Post.where { $0.published }.select { $0.id })
+            let ids: [UUID] = try await repo.all(
+                Post.where { $0.authorID == owner && $0.published }.select { $0.id })
             #expect(ids == [post.id])
 
             let rows: [(UUID, String, Int)] = try await repo.all(
-                Post.order { $0.viewCount.desc() }.select { ($0.id, $0.title, $0.viewCount) })
+                Post.where { $0.authorID == owner }
+                    .order { $0.viewCount.desc() }
+                    .select { ($0.id, $0.title, $0.viewCount) })
             #expect(rows.map(\.1) == ["projected", "other"])
             #expect(rows.map(\.2) == [7, 3])
 
-            let pair = try await repo.one(Post.where { $0.title == "projected" }.select { ($0.title, $0.nickname) })
+            let pair = try await repo.one(
+                Post.where { $0.authorID == owner && $0.title == "projected" }
+                    .select { ($0.title, $0.nickname) })
             #expect(pair?.0 == "projected")
             #expect(pair?.1 == nil)
         }
@@ -152,7 +182,7 @@ struct ProjectionIntegrationTests {
 
     @Test("aggregates: count/sum/avg/min/max, with groupBy and having")
     func aggregates() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let prolific = UUID()
             let quiet = UUID()
             for (author, views) in [(prolific, 10), (prolific, 30), (quiet, 5)] {
@@ -161,8 +191,12 @@ struct ProjectionIntegrationTests {
                 try await repo.insert(post)
             }
 
+            // Restricted to the two authors this test created, so GROUP BY yields
+            // exactly their two groups. HAVING still has to drop `quiet` (sum 5)
+            // for `totals.count == 1` to hold, which is the claim.
+            let mine = Post.where { $0.authorID.in([prolific, quiet]) }
             let totals = try await repo.all(
-                Post.groupBy { $0.authorID }
+                mine.groupBy { $0.authorID }
                     .having { $0.viewCount.sum() > 20 }
                     .select { ($0.authorID, $0.id.count(), $0.viewCount.sum(), $0.viewCount.avg()) })
             #expect(totals.count == 1)
@@ -171,13 +205,18 @@ struct ProjectionIntegrationTests {
             #expect(totals[0].2 == 40)
             #expect(totals[0].3 == 20.0)
 
-            let bounds = try await repo.one(Post.select { ($0.viewCount.min(), $0.viewCount.max()) })
+            // min/max over the same three rows: 5 and 30 are the extremes of
+            // this test's data, not of the table.
+            let bounds = try await repo.one(mine.select { ($0.viewCount.min(), $0.viewCount.max()) })
             #expect(bounds?.0 == 5)
             #expect(bounds?.1 == 30)
 
-            // Aggregates over zero rows are NULL — hence the optionals.
+            // Aggregates over zero rows are NULL — hence the optionals. Still
+            // zero rows, and now provably so: no committed post can be both this
+            // test's author and titled "missing".
             let empty = try await repo.one(
-                Post.where { $0.title == "missing" }.select { ($0.viewCount.sum(), $0.viewCount.avg()) })
+                mine.where { $0.title == "missing" }
+                    .select { ($0.viewCount.sum(), $0.viewCount.avg()) })
             #expect(empty?.0 == nil)
             #expect(empty?.1 == nil)
         }
@@ -190,15 +229,19 @@ struct ProjectionIntegrationTests {
             let posts: Int
             let topTitle: String?
         }
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = UUID()
             for title in ["alpha", "omega"] {
                 var post = Post.sample(title: title)
                 post.authorID = author
                 try await repo.insert(post)
             }
+            // Scoped to this author, so the grouped result is exactly one row —
+            // the equality against a single-element array is the assertion, and
+            // unscoped it would pick up a group per committed author.
             let summaries = try await repo.all(
-                Post.groupBy { $0.authorID }
+                Post.where { $0.authorID == author }
+                    .groupBy { $0.authorID }
                     .select(into: AuthorSummary.self) {
                         (author: $0.authorID, posts: $0.id.count(), topTitle: $0.title.max())
                     })
@@ -208,27 +251,38 @@ struct ProjectionIntegrationTests {
 
     @Test("distinct and IN-list")
     func distinctAndInList() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let shared = UUID()
             for title in ["a", "b"] {
                 var post = Post.sample(title: title)
                 post.authorID = shared
                 try await repo.insert(post)
             }
-            let authors: [UUID] = try await repo.all(Post.select { $0.authorID }.distinct())
+            // Two rows share one author; DISTINCT still has to collapse them to
+            // one, or this reads [shared, shared] and fails.
+            let authors: [UUID] = try await repo.all(
+                Post.where { $0.authorID == shared }.select { $0.authorID }.distinct())
             #expect(authors == [shared])
 
+            // The IN list still does the filtering — "b" is in scope and excluded,
+            // "zzz" matches nothing — the owner scope only keeps other suites'
+            // rows titled "a" out of it.
             let titles: [String] = try await repo.all(
-                Post.where { $0.title.in(["a", "zzz"]) }.select { $0.title })
+                Post.where { $0.authorID == shared && $0.title.in(["a", "zzz"]) }
+                    .select { $0.title })
             #expect(titles == ["a"])
         }
     }
 
     @Test("IN subquery: posts by authors selected in a nested query")
     func inSubquery() async throws {
-        try await withRepo { repo in
-            let ada = try await repo.insert(Author(id: UUID(), name: "ada"))
-            let ghost = try await repo.insert(Author(id: UUID(), name: "ghost"))
+        try await withSandbox { repo in
+            // Unique names: the inner subquery selects "authors named X", and
+            // "ada" is a name other suites commit too — a stray committed ada
+            // would widen the subquery's result and pull in her posts.
+            let adaName = "ada-\(UUID().uuidString)"
+            let ada = try await repo.insert(Author(id: UUID(), name: adaName))
+            let ghost = try await repo.insert(Author(id: UUID(), name: "ghost-\(UUID().uuidString)"))
             var kept = Post.sample(title: "kept")
             kept.authorID = ada.id
             var dropped = Post.sample(title: "dropped")
@@ -236,41 +290,51 @@ struct ProjectionIntegrationTests {
             try await repo.insert(kept)
             try await repo.insert(dropped)
 
-            let adaIDs = Author.where { $0.name == "ada" }.select { $0.id }
-            let posts = try await repo.all(Post.where { $0.authorID.in(adaIDs) })
+            let adaIDs = Author.where { $0.name == adaName }.select { $0.id }
+            // Both of this test's posts are in scope, so the subquery is what
+            // has to exclude `dropped`.
+            let posts = try await repo.all(
+                Post.where { $0.id.in([kept.id, dropped.id]) && $0.authorID.in(adaIDs) })
             #expect(posts.map(\.title) == ["kept"])
         }
     }
 
     @Test("upsert doUpdate: second insert updates only the set columns")
     func upsertDoUpdate() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
+            // A key of this test's own, so the conflict is between the two
+            // inserts below and not with some row committed earlier.
+            let key = "color-\(UUID().uuidString)"
             let first = try await repo.insert(
-                Changeset(KV.self).change(\.key, "color").change(\.value, "red"),
+                Changeset(KV.self).change(\.key, key).change(\.value, "red"),
                 onConflict: .doUpdate(target: [\KV.key], set: [\KV.value]))
             let second = try await repo.insert(
-                Changeset(KV.self).change(\.key, "color").change(\.value, "blue"),
+                Changeset(KV.self).change(\.key, key).change(\.value, "blue"),
                 onConflict: .doUpdate(target: [\KV.key], set: [\KV.value]))
             #expect(first?.value == "red")
             #expect(second?.value == "blue")
             #expect(second?.id == first?.id)  // same row, updated
-            let count = try await repo.count(KV.all)
+            let count = try await repo.count(KV.where { $0.key == key })
             #expect(count == 1)
         }
     }
 
     @Test("upsert doNothing: the conflicting insert is skipped and returns nil")
     func upsertDoNothing() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
+            let key = "color-\(UUID().uuidString)"
             let first = try await repo.insert(
-                Changeset(KV.self).change(\.key, "color").change(\.value, "red"),
+                Changeset(KV.self).change(\.key, key).change(\.value, "red"),
                 onConflict: .doNothing)
             let skipped = try await repo.insert(
-                Changeset(KV.self).change(\.key, "color").change(\.value, "blue"),
+                Changeset(KV.self).change(\.key, key).change(\.value, "blue"),
                 onConflict: .doNothing)
             #expect(first != nil)
             #expect(skipped == nil)
-            let values: [String] = try await repo.all(KV.select { $0.value })
+            // The surviving row still holds the *first* value: DO NOTHING must
+            // not have overwritten it with "blue".
+            let values: [String] = try await repo.all(
+                KV.where { $0.key == key }.select { $0.value })
             #expect(values == ["red"])
         }
     }

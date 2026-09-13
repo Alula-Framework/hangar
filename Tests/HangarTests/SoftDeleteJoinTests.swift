@@ -215,8 +215,25 @@ struct SoftDeleteJoinRendererTests {
 
 // MARK: - Integration
 
-extension PostgresIntegrationSuite {
-    @Suite("Soft delete × joins (real Postgres)")
+// Sandboxed (testing plan, Phase 3). The renderer suite above is untouched: it
+// asserts on generated SQL and never opens a connection.
+//
+// What needed scoping: these tests assert on *which* rows a join returns, and
+// every one of them used to lean on `withRepo` having truncated `hangar_files`
+// and `hangar_authors` first — `repo.all(StoredFile.all)`, `rows.count == 2`,
+// `owners.count == 2`. A sandbox sees every committed row, so each query is now
+// restricted to the seeded fixtures:
+//
+// - base-side (`StoredFile` first) joins take `.where { file, _ in
+//   file.ownerID == seeded.owner.id }`, so *both* seeded files remain in range
+//   and only the deleted-row scope may drop one — the property under test.
+// - joined-side (`Author` first) joins take `.where { owner, _ in
+//   owner.id.in([...]) }` over the two authors the test creates, which keeps the
+//   LEFT-vs-INNER distinction observable: the point is whether the childless
+//   owner survives, so it must be inside the scope, not outside it.
+// - composed queries get the same condition through `q.where(...)`.
+extension SandboxedIntegrationSuite {
+    @Suite("Soft delete × joins (real Postgres, sandboxed)")
     struct SoftDeleteJoinIntegrationTests {
 
         /// One owner, one live file, one deleted file.
@@ -232,45 +249,55 @@ extension PostgresIntegrationSuite {
 
         @Test("a join returns the same rows the equivalent single-table read does")
         func joinMatchesSingleTable() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let seeded = try await seed(repo)
+                let mine = seeded.owner.id
 
-                let single = try await repo.all(StoredFile.all)
+                let single = try await repo.all(StoredFile.where { $0.ownerID == mine })
                 let joined = try await repo.all(
-                    StoredFile.join(Author.self, on: { file, owner in owner.id == file.ownerID }))
+                    StoredFile.join(Author.self, on: { file, owner in owner.id == file.ownerID })
+                        .where { file, _ in file.ownerID == mine })
                 #expect(single.map(\.id) == [seeded.live.id])
                 #expect(joined.map(\.id) == [seeded.live.id])
                 #expect(try await repo.count(
-                    StoredFile.join(Author.self, on: { file, owner in owner.id == file.ownerID })) == 1)
+                    StoredFile.join(Author.self, on: { file, owner in owner.id == file.ownerID })
+                        .where { file, _ in file.ownerID == mine }) == 1)
             }
         }
 
         @Test("onlyDeleted() through a join returns the deleted row, not every row")
         func onlyDeletedThroughAJoin() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let seeded = try await seed(repo)
+                let mine = seeded.owner.id
+                // Both of this owner's files are in range; only the trash view
+                // may narrow it to one, which is what the name claims.
                 let rows = try await repo.all(
                     StoredFile.onlyDeleted()
-                        .join(Author.self, on: { file, owner in owner.id == file.ownerID }))
+                        .join(Author.self, on: { file, owner in owner.id == file.ownerID })
+                        .where { file, _ in file.ownerID == mine })
                 #expect(rows.map(\.id) == [seeded.gone.id])
             }
         }
 
         @Test("withDeleted() through a join returns both")
         func withDeletedThroughAJoin() async throws {
-            try await withRepo { repo in
-                _ = try await seed(repo)
+            try await withSandbox { repo in
+                let seeded = try await seed(repo)
+                let mine = seeded.owner.id
                 let rows = try await repo.all(
                     StoredFile.all.withDeleted()
-                        .join(Author.self, on: { file, owner in owner.id == file.ownerID }))
+                        .join(Author.self, on: { file, owner in owner.id == file.ownerID })
+                        .where { file, _ in file.ownerID == mine })
                 #expect(rows.count == 2)
+                #expect(Set(rows.map(\.id)) == Set([seeded.live.id, seeded.gone.id]))
             }
         }
 
         @Test("a LEFT JOIN to a soft-deletable table keeps parents whose only child is deleted")
         func leftJoinStaysOuter() async throws {
-            try await withRepo { repo in
-                _ = try await seed(repo)
+            try await withSandbox { repo in
+                let seeded = try await seed(repo)
                 // A second owner whose only file is deleted: with the scope
                 // in WHERE rather than ON this row would vanish, which is
                 // the outer join silently becoming an inner one.
@@ -279,8 +306,13 @@ extension PostgresIntegrationSuite {
                     StoredFile(id: UUID(), name: "gone.txt", sizeBytes: 1, ownerID: lonely.id, deletedAt: nil))
                 try await repo.delete(onlyFile)
 
+                // Scoped to the two authors this test created — and the lonely
+                // one is inside that scope, so "he survives the outer join"
+                // remains exactly what the count proves.
+                let authors = [seeded.owner.id, lonely.id]
                 let owners = try await repo.all(
                     Author.leftJoin(StoredFile.self, on: { owner, file in file.ownerID == owner.id })
+                        .where { owner, _ in owner.id.in(authors) }
                         .distinct())
                 #expect(owners.contains { $0.id == lonely.id })
                 #expect(owners.count == 2)
@@ -289,27 +321,35 @@ extension PostgresIntegrationSuite {
 
         @Test("an inner join to a soft-deletable table does not match its deleted rows")
         func innerJoinSkipsDeletedChildren() async throws {
-            try await withRepo { repo in
-                _ = try await seed(repo)
+            try await withSandbox { repo in
+                let seeded = try await seed(repo)
                 let lonely = try await repo.insert(Author(id: UUID(), name: "lonely"))
                 let onlyFile = try await repo.insert(
                     StoredFile(id: UUID(), name: "gone.txt", sizeBytes: 1, ownerID: lonely.id, deletedAt: nil))
                 try await repo.delete(onlyFile)
 
+                let authors = [seeded.owner.id, lonely.id]
                 let owners = try await repo.all(
-                    Author.join(StoredFile.self, on: { owner, file in file.ownerID == owner.id }))
+                    Author.join(StoredFile.self, on: { owner, file in file.ownerID == owner.id })
+                        .where { owner, _ in owner.id.in(authors) })
                 #expect(owners.allSatisfy { $0.id != lonely.id })
+                // The owner with a live file must still come back: otherwise an
+                // inner join that matched nothing at all would satisfy the
+                // assertion above vacuously.
+                #expect(owners.contains { $0.id == seeded.owner.id })
             }
         }
 
         @Test("a composed query honours the scope on both sides")
         func composedHonoursTheScope() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let seeded = try await seed(repo)
+                let mine = seeded.owner.id
 
                 let live = try await repo.all(
                     StoredFile.query { q, file in
                         _ = q.join(Author.self) { $0.id == file.ownerID }
+                        q.where(file.ownerID == mine)
                         return q.query()
                     })
                 #expect(live.map(\.id) == [seeded.live.id])
@@ -317,14 +357,19 @@ extension PostgresIntegrationSuite {
                 let trash = try await repo.all(
                     StoredFile.query { q, file in
                         _ = q.join(Author.self) { $0.id == file.ownerID }
+                        q.where(file.ownerID == mine)
                         q.onlyDeleted()
                         return q.query()
                     })
                 #expect(trash.map(\.id) == [seeded.gone.id])
 
+                // Scoped to the seeded author, whose two files are one live and
+                // one deleted: the count is 1 only because the joined side
+                // excludes its own deleted rows — dropping that scope makes it 2.
                 let counted = try await repo.count(
                     Author.query { q, owner in
                         _ = q.join(StoredFile.self) { $0.ownerID == owner.id }
+                        q.where(owner.id == mine)
                         return q.query()
                     })
                 #expect(counted == 1, "only the live file matches")

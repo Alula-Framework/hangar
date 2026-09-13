@@ -172,9 +172,20 @@ struct CTERendererTests {
     }
 }
 
-@Suite(
-    "CTE — against Postgres", .serialized,
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+// Sandboxed (testing plan, Phase 3). `withRepo` truncated the fixture tables, so
+// "every post with viewCount > 50" meant "the three this test just inserted"; a
+// sandbox truncates nothing and sees every *committed* row, so both non-recursive
+// tests had to name their own rows. Each already creates an author and hangs its
+// posts off it, so the CTE bodies — the sets the outer query actually reads — are
+// now scoped to that author. That is the right place for the scope: it narrows
+// `repo.all`, `repo.count`, `repo.exists` and the CTE-fed DELETE in one move,
+// without touching the predicate whose behaviour is under test.
+//
+// `recursiveWalk` needed no scoping: its anchor is already `id == root.id`, and
+// the recursive step can only reach rows whose `parent_id` chains back to that
+// freshly generated root, so no other suite's tree is reachable.
+extension SandboxedIntegrationSuite {
+@Suite("CTE — against Postgres, sandboxed")
 struct CTEIntegrationTests {
 
     /// root → a → a1, and a detached sibling that must not appear.
@@ -188,7 +199,7 @@ struct CTEIntegrationTests {
 
     @Test("a recursive CTE walks a tree of unbounded depth")
     func recursiveWalk() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let root = try await seedTree(repo)
             let subtree = Node.all
                 .withRecursive(
@@ -208,7 +219,7 @@ struct CTEIntegrationTests {
 
     @Test("a non-recursive CTE feeds a predicate, with real binds")
     func nonRecursive() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "A"))
             for (title, views) in [("hot", 900), ("warm", 100), ("cold", 1)] {
                 _ = try await repo.insert(
@@ -219,8 +230,13 @@ struct CTEIntegrationTests {
                         authorID: author.id))
             }
 
+            // The CTE body is scoped to this test's author: "the busy posts"
+            // has to mean the busy posts *this test wrote*, or every other
+            // suite's committed high-view rows would ride along. "cold" (1 view)
+            // is still in scope and still excluded, so the predicate — the thing
+            // under test — is doing exactly as much work as before.
             let query = Post.all
-                .with("busy", as: Post.where { $0.viewCount > 50 })
+                .with("busy", as: Post.where { $0.authorID == author.id && $0.viewCount > 50 })
                 .reading(from: "busy")
                 .order { $0.title.asc() }
 
@@ -232,7 +248,7 @@ struct CTEIntegrationTests {
 
     @Test("a CTE feeds a bulk delete")
     func cteFedDelete() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "A"))
             for (title, views) in [("keep", 900), ("drop", 1)] {
                 _ = try await repo.insert(
@@ -243,15 +259,21 @@ struct CTEIntegrationTests {
                         authorID: author.id))
             }
 
+            // "doomed" is scoped to this author for the same reason, and here it
+            // is load-bearing twice over: an unscoped CTE would make `deleted`
+            // count other suites' rows *and* would delete them (inside the
+            // sandbox, so harmlessly — but the assertion would be wrong).
             let deleted = try await repo.delete(
                 Post.all
-                    .with("doomed", as: Post.where { $0.viewCount < 10 })
+                    .with("doomed", as: Post.where { $0.authorID == author.id && $0.viewCount < 10 })
                     .where { _ in
                         SQLFragment(#""hangar_posts"."id" IN (SELECT "id" FROM "doomed")"#)
                     })
 
             #expect(deleted == 1)
-            #expect(try await repo.all(Post.all).map(\.title) == ["keep"])
+            #expect(
+                try await repo.all(Post.where { $0.authorID == author.id }).map(\.title) == ["keep"])
         }
     }
+}
 }
