@@ -124,13 +124,18 @@ struct DistinctOnRendererTests {
 
 // MARK: - Integration
 
-extension PostgresIntegrationSuite {
-    @Suite("Three-table joins and DISTINCT ON (real Postgres)")
+// Sandboxed (testing plan, Phase 3). All three tests asserted over whole-table
+// joins, so each is scoped: the first two to the post they create, the third to
+// the two author ids it groups by. Scoping the DISTINCT ON case matters most —
+// "newest per author" over every committed post would count other suites' rows
+// as groups.
+extension SandboxedIntegrationSuite {
+    @Suite("Three-table joins and DISTINCT ON (real Postgres, sandboxed)")
     struct ThreeTableIntegrationTests {
 
         @Test("post → comment → author, projected across all three")
         func endToEnd() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let ada = try await repo.insert(Author(id: UUID(), name: "ada"))
                 let grace = try await repo.insert(Author(id: UUID(), name: "grace"))
                 var post = Post.sample(title: "joined")
@@ -150,6 +155,7 @@ extension PostgresIntegrationSuite {
                 let rows = try await repo.all(
                     Post.join(Comment.self, on: { p, c in c.postID == p.id })
                         .join(Author.self, on: { _, c, a in c.authorID == a.id })
+                        .where { p, _, _ in p.id == stored.id }
                         .order { _, _, a in a.name.asc() }
                         .select(into: Row.self) { p, c, a in
                             (title: p.title, body: c.body, commenter: a.name)
@@ -161,29 +167,33 @@ extension PostgresIntegrationSuite {
                 let posts = try await repo.all(
                     Post.join(Comment.self, on: { p, c in c.postID == p.id })
                         .join(Author.self, on: { _, c, a in c.authorID == a.id })
+                        .where { p, _, _ in p.id == stored.id }
                         .distinct())
                 #expect(posts.map(\.title) == ["joined"])
 
                 // count and exists honor the same clauses.
                 let matches = try await repo.count(
                     Post.join(Comment.self, on: { p, c in c.postID == p.id })
-                        .join(Author.self, on: { _, c, a in c.authorID == a.id }))
+                        .join(Author.self, on: { _, c, a in c.authorID == a.id })
+                        .where { p, _, _ in p.id == stored.id })
                 #expect(matches == 2)
                 let grouped = try await repo.count(
                     Post.join(Comment.self, on: { p, c in c.postID == p.id })
                         .join(Author.self, on: { _, c, a in c.authorID == a.id })
+                        .where { p, _, _ in p.id == stored.id }
                         .groupBy { _, _, a in a.id })
                 #expect(grouped == 2, "two commenter groups, not two matches")
                 let any = try await repo.exists(
                     Post.join(Comment.self, on: { p, c in c.postID == p.id })
-                        .join(Author.self, on: { _, _, a in a.name == "grace" }))
+                        .join(Author.self, on: { _, _, a in a.name == "grace" })
+                        .where { p, _, _ in p.id == stored.id })
                 #expect(any)
             }
         }
 
         @Test("preloads composed before two joins still run on the base entities")
         func preloadThroughThreeTables() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let ada = try await repo.insert(Author(id: UUID(), name: "ada"))
                 var post = Post.sample(title: "with-author")
                 post.authorID = ada.id
@@ -193,7 +203,7 @@ extension PostgresIntegrationSuite {
                             moderatorID: nil, body: "note"))
 
                 let posts = try await repo.all(
-                    Post.all.preload(\.author)
+                    Post.where { $0.id == stored.id }.preload(\.author)
                         .join(Comment.self, on: { p, c in c.postID == p.id })
                         .join(Author.self, on: { _, c, a in c.authorID == a.id }))
                 #expect(try posts.map { try $0.author.get().name } == ["ada"])
@@ -202,9 +212,10 @@ extension PostgresIntegrationSuite {
 
         @Test("DISTINCT ON answers 'newest per group' end to end")
         func newestPerAuthor() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let first = UUID()
                 let second = UUID()
+                let mine = [first, second]
                 for (author, title, minutesAgo) in [
                     (first, "old-a", 60), (first, "new-a", 1),
                     (second, "old-b", 90), (second, "new-b", 5),
@@ -215,15 +226,20 @@ extension PostgresIntegrationSuite {
                     try await repo.insert(post)
                 }
                 let newest = try await repo.all(
-                    Post.distinct(on: { $0.authorID })
+                    Post.where { $0.authorID.in(mine) }
+                        .distinct(on: { $0.authorID })
                         .order { $0.authorID.asc() }
                         .order { $0.createdAt.desc() })
                 #expect(newest.count == 2)
                 #expect(Set(newest.map(\.title)) == ["new-a", "new-b"])
 
                 // ...and count counts groups, not rows.
-                #expect(try await repo.count(Post.distinct(on: { $0.authorID })) == 2)
-                #expect(try await repo.count(Post.all.groupBy { $0.authorID }) == 2)
+                #expect(
+                    try await repo.count(
+                        Post.where { $0.authorID.in(mine) }.distinct(on: { $0.authorID })) == 2)
+                #expect(
+                    try await repo.count(
+                        Post.where { $0.authorID.in(mine) }.groupBy { $0.authorID }) == 2)
             }
         }
     }
