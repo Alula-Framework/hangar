@@ -1,8 +1,26 @@
 import Foundation
 import Logging
 import PostgresNIO
+import Testing
 
 import Hangar
+
+/// The parent suite for sandboxed tests — the counterpart to
+/// ``PostgresIntegrationSuite``, minus the thing that matters.
+///
+/// `PostgresIntegrationSuite` is `.serialized`, and that trait applies
+/// *recursively* to everything nested inside it, because `withRepo` truncates
+/// shared fixture tables and two suites doing that concurrently would delete
+/// each other's rows. Sandboxed tests have no such hazard: they commit nothing,
+/// so there is nothing to protect and no reason to serialize. Nesting under this
+/// parent instead of that one is what actually buys the parallelism — leaving
+/// them under the serialized parent would convert the isolation mechanism while
+/// silently keeping the single-lane execution.
+///
+/// The DB gate is still inherited-by-nesting, so a new sandboxed suite only has
+/// to remember where to nest.
+@Suite(.enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+struct SandboxedIntegrationSuite {}
 
 /// Runs `body` with a `Repo` pinned to one connection inside a transaction that
 /// is **always rolled back** — the value-level equivalent of Ecto's

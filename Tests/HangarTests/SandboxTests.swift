@@ -7,15 +7,16 @@ import Hangar
 // `withSandbox`. Each one corresponds to a gate criterion (G1.1–G1.5), and the
 // primitive is only sound if all five hold.
 //
-// Deliberately NOT `.serialized` and deliberately not taking `DatabaseLock`:
-// the entire claim being tested is that a sandbox needs neither. Every test
-// tags its rows with a unique title so that fixture rows left behind by the
+// Nested under `SandboxedIntegrationSuite`, not `PostgresIntegrationSuite`:
+// the latter is `.serialized` and that trait applies recursively, which would
+// keep these in the single lane the sandbox exists to escape. No
+// `DatabaseLock` either — the claim under test is that a sandbox needs neither.
+//
+// Every test tags its rows with a unique title so that rows left behind by the
 // truncating suites can never satisfy or spoil an assertion here.
 
-extension PostgresIntegrationSuite {
-@Suite(
-    "withSandbox — transactional test isolation",
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+extension SandboxedIntegrationSuite {
+@Suite("withSandbox — transactional test isolation")
 struct SandboxTests {
 
     /// A title no other suite can collide with.

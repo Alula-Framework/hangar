@@ -45,15 +45,29 @@ struct PreloadRendererTests {
     }
 }
 
-extension PostgresIntegrationSuite {
-@Suite(
-    "Preloading (real Postgres)",
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+// Converted to `withSandbox` (testing plan, Phase 2). Two changes, and the
+// second is not optional:
+//
+// 1. `withRepo` → `withSandbox`: isolation now comes from a transaction that is
+//    always rolled back, not from truncating the fixture tables under a global
+//    lock. Nested under `SandboxedIntegrationSuite`, which unlike
+//    `PostgresIntegrationSuite` is not `.serialized`.
+//
+// 2. **Every query is scoped to the rows the test itself created.** `withRepo`
+//    truncated on entry, so an unscoped `Post.all` was implicitly "the rows this
+//    test just inserted". A sandbox truncates nothing and sees everything
+//    *committed*, including fixtures the three serialized suites leave behind —
+//    so the old unscoped assertions would break, and would break
+//    order-dependently. Scoping by the created ids is what makes these tests
+//    independent of what else has run, which is the precondition for running
+//    them in parallel at all.
+extension SandboxedIntegrationSuite {
+@Suite("Preloading (real Postgres, sandboxed)")
 struct PreloadIntegrationTests {
 
     @Test("hasMany: one batched query, each parent gets exactly its children")
     func hasManyBatched() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "ada"))
             let withComments = try await repo.insert(Post.sample(title: "commented"))
             let without = try await repo.insert(Post.sample(title: "quiet"))
@@ -63,21 +77,22 @@ struct PreloadIntegrationTests {
             }
 
             let posts = try await repo.all(
-                Post.all.order { $0.title.asc() }.preload(\.comments))
+                Post.where { $0.id.in([withComments.id, without.id]) }
+                    .order { $0.title.asc() }
+                    .preload(\.comments))
             #expect(posts.map(\.title) == ["commented", "quiet"])
             #expect(try posts[0].comments.get().count == 3)
             #expect(try posts[0].comments.get().allSatisfy { $0.postID == withComments.id })
-            // "No comments" is data —.loaded([]), never.notLoaded.
+            // "No comments" is data — .loaded([]), never .notLoaded.
             #expect(try posts[1].comments.get().isEmpty)
-            _ = without
         }
     }
 
     @Test("an unpreloaded association fails loudly, never queries silently")
     func notPreloaded() async throws {
-        try await withRepo { repo in
-            try await repo.insert(Post.sample())
-            let post = try #require(try await repo.one(Post.all))
+        try await withSandbox { repo in
+            let inserted = try await repo.insert(Post.sample())
+            let post = try #require(try await repo.one(Post.where { $0.id == inserted.id }))
             do {
                 _ = try post.comments.get()
                 Issue.record("expected HangarError.notPreloaded")
@@ -90,7 +105,7 @@ struct PreloadIntegrationTests {
 
     @Test("belongsTo: shared parents load once and fan out")
     func belongsTo() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let ada = try await repo.insert(Author(id: UUID(), name: "ada"))
             let brian = try await repo.insert(Author(id: UUID(), name: "brian"))
             var first = Post.sample(title: "a1")
@@ -101,39 +116,44 @@ struct PreloadIntegrationTests {
             third.authorID = brian.id
             for post in [first, second, third] { try await repo.insert(post) }
 
-            let posts = try await repo.all(Post.all.order { $0.title.asc() }.preload(\.author))
+            let posts = try await repo.all(
+                Post.where { $0.id.in([first.id, second.id, third.id]) }
+                    .order { $0.title.asc() }
+                    .preload(\.author))
             #expect(try posts.map { try $0.author.get().name } == ["ada", "ada", "brian"])
         }
     }
 
     @Test("belongsTo with a dangling reference throws, not lies")
     func danglingBelongsTo() async throws {
-        try await withRepo { repo in
-            try await repo.insert(Post.sample())  // authorID references nobody
+        try await withSandbox { repo in
+            let orphan = try await repo.insert(Post.sample())  // authorID references nobody
             await #expect(throws: HangarError.self) {
-                _ = try await repo.all(Post.all.preload(\.author))
+                _ = try await repo.all(Post.where { $0.id == orphan.id }.preload(\.author))
             }
         }
     }
 
     @Test("hasOne: absence is .loaded(nil), not .notLoaded")
     func hasOne() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let withProfile = try await repo.insert(Author(id: UUID(), name: "ada"))
             let without = try await repo.insert(Author(id: UUID(), name: "ghost"))
             try await repo.insert(
                 Profile(id: UUID(), authorID: withProfile.id, bio: "wrote things"))
 
-            let authors = try await repo.all(Author.all.order { $0.name.asc() }.preload(\.profile))
+            let authors = try await repo.all(
+                Author.where { $0.id.in([withProfile.id, without.id]) }
+                    .order { $0.name.asc() }
+                    .preload(\.profile))
             #expect(try authors[0].profile.get()?.bio == "wrote things")
             #expect(try authors[1].profile.get() == nil)
-            _ = without
         }
     }
 
     @Test("nullable belongsTo: nil keys load .loaded(nil) without querying for them")
     func nullableBelongsTo() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "ada"))
             let moderator = try await repo.insert(Author(id: UUID(), name: "mod"))
             let post = try await repo.insert(Post.sample())
@@ -144,7 +164,9 @@ struct PreloadIntegrationTests {
                 Comment(id: UUID(), postID: post.id, authorID: author.id, body: "free"))
 
             let comments = try await repo.all(
-                Comment.all.order { $0.body.asc() }.preload(\.moderator))
+                Comment.where { $0.postID == post.id }
+                    .order { $0.body.asc() }
+                    .preload(\.moderator))
             #expect(try comments[0].moderator.get() == nil)          // "free"
             #expect(try comments[1].moderator.get()?.name == "mod")  // "moderated"
         }
@@ -152,7 +174,7 @@ struct PreloadIntegrationTests {
 
     @Test("nested preloads compose; the nested closure tunes the child query")
     func nestedPreloads() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "ada"))
             try await repo.insert(
                 Profile(id: UUID(), authorID: author.id, bio: "nested deep"))
@@ -165,7 +187,7 @@ struct PreloadIntegrationTests {
             }
 
             let posts = try await repo.all(
-                Post.where { $0.title == "threaded" }
+                Post.where { $0.id == post.id }
                     .preload(\.comments) {
                         $0.order { $0.body.asc() }
                             .preload(\.author) { $0.preload(\.profile) }
@@ -179,7 +201,7 @@ struct PreloadIntegrationTests {
 
     @Test("multiple preloads on one query; one() applies them too")
     func multiplePreloadsAndOne() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "ada"))
             var post = Post.sample(title: "full")
             post.authorID = author.id
@@ -189,7 +211,7 @@ struct PreloadIntegrationTests {
 
             let fetched = try #require(
                 try await repo.one(
-                    Post.where { $0.title == "full" }.preload(\.comments).preload(\.author)))
+                    Post.where { $0.id == post.id }.preload(\.comments).preload(\.author)))
             #expect(try fetched.comments.get().count == 1)
             #expect(try fetched.author.get().name == "ada")
         }
@@ -197,7 +219,7 @@ struct PreloadIntegrationTests {
 
     @Test("hasMany from the other side: an author's posts")
     func authorPosts() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let author = try await repo.insert(Author(id: UUID(), name: "ada"))
             for title in ["one", "two"] {
                 var post = Post.sample(title: title)
@@ -205,7 +227,8 @@ struct PreloadIntegrationTests {
                 try await repo.insert(post)
             }
             let authors = try await repo.all(
-                Author.all.preload(\.posts) { $0.where { $0.published } })
+                Author.where { $0.id == author.id }
+                    .preload(\.posts) { $0.where { $0.published } })
             #expect(try authors[0].posts.get().count == 2)
         }
     }

@@ -107,6 +107,44 @@ actor DatabaseLock {
     }
 }
 
+/// Empties the fixture tables with `DELETE` rather than `TRUNCATE`.
+///
+/// `TRUNCATE` takes an `AccessExclusiveLock`, and taking it on twelve tables in
+/// one statement deadlocks against a concurrent sandboxed test that holds row
+/// locks on those tables in a different order. Postgres reported it exactly:
+///
+/// ```
+/// deadlock detected
+///   8970 (INSERT INTO hangar_posts) waits for RowExclusiveLock on 41477, blocked by 8971
+///   8971 (TRUNCATE ...)             waits for AccessExclusiveLock on 41493, blocked by 8970
+/// ```
+///
+/// `DELETE` takes only `RowExclusiveLock`, which does not conflict at the table
+/// level — so a truncating suite and a sandboxed one can no longer form a lock
+/// cycle. It is also invisible to the sandbox either way: a sandbox's rows are
+/// uncommitted, so this never sees them, and this deletes committed rows the
+/// sandbox never created.
+///
+/// One statement per table because `DELETE` has no multi-table form and
+/// PostgresNIO uses the extended protocol (no multi-statement strings).
+/// `hangar_authors` goes last: `hangar_kv.owner_id` references it, and that is
+/// the schema's only foreign key.
+///
+/// Neither this nor the old `TRUNCATE` resets identity sequences, so tests
+/// could never depend on exact generated ids — that has not changed.
+func clearFixtureTables(_ client: PostgresClient) async throws {
+    let tables = [
+        "hangar_kv", "hangar_posts", "hangar_events", "hangar_comments",
+        "hangar_profiles", "hangar_tagged", "hangar_tags", "hangar_post_tags",
+        "hangar_tagged_posts", "hangar_files", "hangar_nodes",
+        "hangar_authors",
+    ]
+    for table in tables {
+        _ = try await client.query(
+            PostgresQuery(unsafeSQL: #"DELETE FROM "\#(table)""#), logger: nil)
+    }
+}
+
 /// Runs `body` with a started client and a `Repo` on it, ensuring the
 /// fixture schema exists and the tables are empty.
 func withRepo<T: Sendable>(_ body: @Sendable (Repo) async throws -> T) async throws -> T {
@@ -123,9 +161,7 @@ private func withRepoUnlocked<T: Sendable>(
         group.addTask { await client.run() }
         do {
             try await TestSchema.shared.ensure(client)
-            _ = try await client.query(
-                #"TRUNCATE "hangar_posts", "hangar_events", "hangar_authors", "hangar_comments", "hangar_profiles", "hangar_kv", "hangar_tagged", "hangar_tags", "hangar_post_tags", "hangar_tagged_posts", "hangar_files", "hangar_nodes""#,
-                logger: nil)
+            try await clearFixtureTables(client)
             let result = try await body(Repo(client: client))
             group.cancelAll()
             return result
@@ -158,9 +194,7 @@ private func withRepoUnlocked<T: Sendable>(
         group.addTask { await client.run() }
         do {
             try await TestSchema.shared.ensure(client)
-            _ = try await client.query(
-                #"TRUNCATE "hangar_posts", "hangar_events", "hangar_authors", "hangar_comments", "hangar_profiles", "hangar_kv", "hangar_tagged", "hangar_tags", "hangar_post_tags", "hangar_tagged_posts", "hangar_files", "hangar_nodes""#,
-                logger: nil)
+            try await clearFixtureTables(client)
             var repo = Repo(client: client, logger: logger)
             repo.diagnostics = diagnostics
             let result = try await body(repo)
@@ -196,12 +230,37 @@ func withIntrospector<T: Sendable>(
 }
 
 /// Creates the fixture schema once per process.
+///
+/// The flag-guarded version of this was unsafe the moment suites stopped being
+/// `.serialized`. `ensure` awaits, and **an actor is reentrant across awaits**,
+/// so a second caller arriving while the first was still running the DDL saw the
+/// flag unset and ran the whole destructive script again: `CREATE TYPE
+/// "post_status"` failed with a duplicate-key error on `pg_type`, and the
+/// `DROP TABLE`s could fire underneath a test already using the tables. It never
+/// showed while one lock funnelled every DB test through a single lane.
+///
+/// Holding the *task* rather than a flag makes every concurrent caller await the
+/// same single execution, which is what "once per process" has to mean when
+/// callers can overlap.
 actor TestSchema {
     static let shared = TestSchema()
-    private var done = false
+    private var creation: Task<Void, any Error>?
 
     func ensure(_ client: PostgresClient) async throws {
-        guard !done else { return }
+        if let creation { return try await creation.value }
+        let task = Task { try await Self.create(on: client) }
+        creation = task
+        do {
+            try await task.value
+        } catch {
+            // Don't cache a failure — let the next caller retry rather than
+            // every later test inheriting one transient connection error.
+            creation = nil
+            throw error
+        }
+    }
+
+    private static func create(on client: PostgresClient) async throws {
         let statements = [
             #"DROP TABLE IF EXISTS "hangar_files""#,
             #"DROP TABLE IF EXISTS "hangar_posts""#,
@@ -313,6 +372,5 @@ actor TestSchema {
         for sql in statements {
             _ = try await client.query(PostgresQuery(unsafeSQL: sql), logger: nil)
         }
-        done = true
     }
 }
