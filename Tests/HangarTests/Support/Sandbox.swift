@@ -4,6 +4,7 @@ import PostgresNIO
 import Testing
 
 import Hangar
+import HangarTesting
 
 /// The parent suite for sandboxed tests — the counterpart to
 /// ``PostgresIntegrationSuite``, minus the thing that matters.
@@ -22,43 +23,20 @@ import Hangar
 @Suite(.enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
 struct SandboxedIntegrationSuite {}
 
-/// Runs `body` with a `Repo` pinned to one connection inside a transaction that
-/// is **always rolled back** — the value-level equivalent of Ecto's
-/// `Ecto.Adapters.SQL.Sandbox`.
+/// ``withSandbox(_:logger:diagnostics:_:)`` from `HangarTesting`, wrapped with
+/// this suite's fixture client and schema.
 ///
-/// Isolation comes from nothing ever being committed, rather than from wiping
-/// shared tables. That is the whole difference from ``withRepo(_:)``: no
-/// `TRUNCATE`, and therefore no `DatabaseLock`, and therefore sandboxed tests
-/// can run *concurrently* with each other.
-///
-/// ## Why it is safe
-///
-/// The repo is built with `inTransaction: true`, which puts it at depth 1. A
-/// `repo.transaction { }` inside `body` therefore renders as
-/// `SAVEPOINT`/`RELEASE`/`ROLLBACK TO` rather than `BEGIN`/`COMMIT` (see
-/// `Transaction.swift`), so code under test **cannot commit its way out of the
-/// sandbox**. Without that property this helper would be unsound.
-///
-/// ## What it cannot test
-///
-/// - **Serialization retry.** `retryingOnSerializationFailure` short-circuits
-///   when already in a transaction, so retries never fire in here.
-/// - **Cross-connection visibility.** Uncommitted rows are invisible to any
-///   other connection: replica routing, `LISTEN`/`NOTIFY`, advisory locks and
-///   any two-client test must use ``withRepo(_:)`` instead.
-/// - **Generated sequence values.** Sequences do not roll back, so an assertion
-///   on an exact `SERIAL`/identity value is not reproducible.
-///
-/// - Note: `body` is invoked *inside* the lease closure rather than passed
-///   across it. Region isolation rejects the round trip — the same constraint
-///   `Repo.transaction` documents.
+/// The sandbox mechanics themselves now ship in the `HangarTesting` product —
+/// this is only the part that is specific to Hangar's own fixtures: standing up a
+/// client against `HANGAR_TEST_DATABASE_URL` and making sure the fixture schema
+/// exists. Applications supply their own pool and call the shipped helper
+/// directly.
 func withSandbox<T: Sendable>(_ body: @Sendable (Repo) async throws -> T) async throws -> T {
     try await runSandbox(logger: nil, diagnostics: nil, body)
 }
 
 /// ``withSandbox(_:)`` with a logger and diagnostics attached — for the suites
-/// that assert on what Hangar *reports* rather than on what it returns. The
-/// counterpart to `withRepo(logger:diagnostics:)`.
+/// that assert on what Hangar *reports* rather than on what it returns.
 func withSandbox<T: Sendable>(
     logger: Logger,
     diagnostics: QueryDiagnostics,
@@ -76,27 +54,12 @@ private func runSandbox<T: Sendable>(
     return try await withThrowingTaskGroup(of: Void.self) { group in
         group.addTask { await client.run() }
         do {
-            // Idempotent and process-wide, so it costs nothing after the first
-            // sandbox. Deliberately outside the transaction: DDL that rolled
-            // back would leave every later sandbox without a schema.
+            // Idempotent and process-wide. Deliberately outside the sandbox
+            // transaction: DDL that rolled back would leave every later sandbox
+            // without a schema.
             try await TestSchema.shared.ensure(client)
-            let result = try await client.withConnection { connection in
-                let log = logger ?? Logger(label: "hangar.sandbox")
-                _ = try await connection.query("BEGIN", logger: log)
-                do {
-                    var repo = Repo(connection: connection, inTransaction: true, logger: logger)
-                    if let diagnostics { repo.diagnostics = diagnostics }
-                    let value = try await body(repo)
-                    // Rolled back on the *success* path too: a sandbox never
-                    // commits, so a passing test leaves exactly as little
-                    // behind as a failing one.
-                    _ = try? await connection.query("ROLLBACK", logger: log)
-                    return value
-                } catch {
-                    _ = try? await connection.query("ROLLBACK", logger: log)
-                    throw error
-                }
-            }
+            let result = try await HangarTesting.withSandbox(
+                client, logger: logger, diagnostics: diagnostics, body)
             group.cancelAll()
             return result
         } catch {
