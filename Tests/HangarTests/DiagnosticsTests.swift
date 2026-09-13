@@ -9,9 +9,11 @@ import Testing
 /// Every statement is already timed; these assert that the timing becomes a
 /// log line naming the SQL, because a p99 on a dashboard cannot tell you
 /// *which* query is slow.
-@Suite(
-    "Query diagnostics", .serialized,
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+// Sandboxed (testing plan, Phase 3). No scoping needed anywhere: every
+// assertion is about what Hangar *logged*, not about which rows came back, so
+// `Post.all` here just means "run some statement".
+extension SandboxedIntegrationSuite {
+@Suite("Query diagnostics (sandboxed)")
 struct DiagnosticsTests {
 
     private func repoWithRecorder(
@@ -22,7 +24,7 @@ struct DiagnosticsTests {
             RecordingLogHandler(recorder: recorder)
         }
         logger.logLevel = .debug
-        try await withRepo(logger: logger, diagnostics: diagnostics) { repo in
+        try await withSandbox(logger: logger, diagnostics: diagnostics) { repo in
             try await body(repo, recorder)
         }
     }
@@ -100,4 +102,5 @@ struct DiagnosticsTests {
             #expect(recorder.snapshot().filter { $0.message == "hangar repeated query" }.isEmpty)
         }
     }
+}
 }

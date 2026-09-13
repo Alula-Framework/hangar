@@ -53,6 +53,25 @@ struct SandboxedIntegrationSuite {}
 ///   across it. Region isolation rejects the round trip — the same constraint
 ///   `Repo.transaction` documents.
 func withSandbox<T: Sendable>(_ body: @Sendable (Repo) async throws -> T) async throws -> T {
+    try await runSandbox(logger: nil, diagnostics: nil, body)
+}
+
+/// ``withSandbox(_:)`` with a logger and diagnostics attached — for the suites
+/// that assert on what Hangar *reports* rather than on what it returns. The
+/// counterpart to `withRepo(logger:diagnostics:)`.
+func withSandbox<T: Sendable>(
+    logger: Logger,
+    diagnostics: QueryDiagnostics,
+    _ body: @Sendable (Repo) async throws -> T
+) async throws -> T {
+    try await runSandbox(logger: logger, diagnostics: diagnostics, body)
+}
+
+private func runSandbox<T: Sendable>(
+    logger: Logger?,
+    diagnostics: QueryDiagnostics?,
+    _ body: @Sendable (Repo) async throws -> T
+) async throws -> T {
     let client = PostgresClient(configuration: try TestDatabase.clientConfiguration())
     return try await withThrowingTaskGroup(of: Void.self) { group in
         group.addTask { await client.run() }
@@ -62,11 +81,12 @@ func withSandbox<T: Sendable>(_ body: @Sendable (Repo) async throws -> T) async 
             // back would leave every later sandbox without a schema.
             try await TestSchema.shared.ensure(client)
             let result = try await client.withConnection { connection in
-                let log = Logger(label: "hangar.sandbox")
+                let log = logger ?? Logger(label: "hangar.sandbox")
                 _ = try await connection.query("BEGIN", logger: log)
                 do {
-                    let value = try await body(
-                        Repo(connection: connection, inTransaction: true))
+                    var repo = Repo(connection: connection, inTransaction: true, logger: logger)
+                    if let diagnostics { repo.diagnostics = diagnostics }
+                    let value = try await body(repo)
                     // Rolled back on the *success* path too: a sandbox never
                     // commits, so a passing test leaves exactly as little
                     // behind as a failing one.
