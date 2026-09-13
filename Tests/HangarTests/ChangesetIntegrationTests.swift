@@ -25,15 +25,18 @@ func postChangeset(
         .change(\.authorID, UUID())
 }
 
-extension PostgresIntegrationSuite {
-@Suite(
-    "Changeset writes (real Postgres)",
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+// Sandboxed (testing plan, Phase 3). One assertion had to change shape: the
+// invalid-changeset test proved "nothing was written" with a whole-table
+// `count(Post.all) == 0`, which only held because `withRepo` truncated first. It
+// now counts rows carrying the title the invalid changeset tried to write, which
+// is both sandbox-safe and a sharper statement of the actual claim.
+extension SandboxedIntegrationSuite {
+@Suite("Changeset writes (real Postgres, sandboxed)")
 struct ChangesetIntegrationTests {
 
     @Test("insert: changed fields are written, defaults fill the rest")
     func insertChangeset() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let stored = try await repo.insert(
                 postChangeset(title: "via changeset").validate(\.title, .length(1...80)))
             #expect(stored.title == "via changeset")
@@ -45,7 +48,7 @@ struct ChangesetIntegrationTests {
 
     @Test("an invalid changeset never reaches the wire")
     func invalidChangeset() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let invalid = postChangeset(title: "").validate(\.title, .length(1...80))
             do {
                 _ = try await repo.insert(invalid)
@@ -53,14 +56,17 @@ struct ChangesetIntegrationTests {
             } catch let error as ChangesetValidationError {
                 #expect(error.errors.map(\.field) == ["title"])
             }
-            let count = try await repo.count(Post.all)
+            // Scoped to the row this changeset tried to write: a sandbox sees
+            // committed rows, so a whole-table count would be measuring other
+            // suites. "" is precisely what made the changeset invalid.
+            let count = try await repo.count(Post.where { $0.title == "" })
             #expect(count == 0)
         }
     }
 
     @Test("update: only dirty columns are written; the rest stay intact")
     func updateChangeset() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let original = try await repo.insert(Post.sample(title: "before", nickname: "zed"))
             let updated = try await repo.update(
                 Changeset(original: original)
@@ -75,7 +81,7 @@ struct ChangesetIntegrationTests {
 
     @Test("a no-change update changeset is a no-op, not a query")
     func noopUpdate() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let original = try await repo.insert(Post.sample(title: "same"))
             let changeset = Changeset(original: original)
                 .change(\.title, "same")  // equals the original — not dirty
@@ -87,7 +93,7 @@ struct ChangesetIntegrationTests {
 
     @Test("cross-field rules run against effective state")
     func crossFieldRule() async throws {
-        try await withRepo { repo in
+        try await withSandbox { repo in
             let changeset = postChangeset(title: "ordered", viewCount: 5)
                 .validate(.custom(on: \.viewCount, message: "must stay under 10") {
                     ($0.value(\.viewCount) ?? 0) < 10
