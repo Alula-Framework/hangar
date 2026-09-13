@@ -207,24 +207,26 @@ private func withRepoUnlocked<T: Sendable>(
     }
 }
 
-/// A `SchemaIntrospector` over the fixture database, under the same lock as
-/// the other integration helpers.
+/// A `SchemaIntrospector` over the fixture database.
+///
+/// Takes no lock and needs no sandbox: introspection reads `pg_catalog` — table
+/// and column *definitions*, never rows — so it neither truncates anything nor
+/// cares what any concurrent test has written. It only ever held
+/// `DatabaseLock` because every other integration helper did.
 func withIntrospector<T: Sendable>(
     _ body: @Sendable (SchemaIntrospector) async throws -> T
 ) async throws -> T {
-    try await DatabaseLock.shared.exclusive {
-        let client = PostgresClient(configuration: try TestDatabase.clientConfiguration())
-        return try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { await client.run() }
-            do {
-                try await TestSchema.shared.ensure(client)
-                let result = try await body(SchemaIntrospector(client: client))
-                group.cancelAll()
-                return result
-            } catch {
-                group.cancelAll()
-                throw error
-            }
+    let client = PostgresClient(configuration: try TestDatabase.clientConfiguration())
+    return try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask { await client.run() }
+        do {
+            try await TestSchema.shared.ensure(client)
+            let result = try await body(SchemaIntrospector(client: client))
+            group.cancelAll()
+            return result
+        } catch {
+            group.cancelAll()
+            throw error
         }
     }
 }

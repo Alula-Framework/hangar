@@ -57,12 +57,17 @@ struct PageArithmeticTests {
     }
 }
 
-@Suite(
-    "Pagination against Postgres", .serialized,
-    .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
+// Sandboxed (testing plan, Phase 3). Every assertion here is an exact total
+// (25, 13, 5, 30, 12) over `Post.all`, which only held because withRepo
+// truncated first. `seed` now returns the author it creates and every query is
+// scoped to that author's posts, which preserves each total exactly while making
+// the tests independent of anything else committed.
+extension SandboxedIntegrationSuite {
+@Suite("Pagination against Postgres (sandboxed)")
 struct PaginationIntegrationTests {
 
-    private func seed(_ repo: Repo, count: Int) async throws {
+    /// Returns the id of the author owning the seeded posts, for scoping.
+    private func seed(_ repo: Repo, count: Int) async throws -> UUID {
         let author = Author(id: UUID(), name: "Ada")
         _ = try await repo.insert(author)
         for index in 0..<count {
@@ -73,15 +78,17 @@ struct PaginationIntegrationTests {
                     nickname: nil, status: .published, metadata: PostMetadata(tags: [], readingMinutes: index),
                     authorID: author.id))
         }
+        return author.id
     }
 
     @Test("a page carries its slice and the total behind it")
     func pageAndTotal() async throws {
-        try await withRepo { repo in
-            try await seed(repo, count: 25)
+        try await withSandbox { repo in
+            let owner = try await seed(repo, count: 25)
 
             let page = try await repo.page(
-                Post.all.order { $0.viewCount.asc() }, PageRequest(page: 2, perPage: 10))
+                Post.where { $0.authorID == owner }.order { $0.viewCount.asc() },
+                PageRequest(page: 2, perPage: 10))
 
             #expect(page.items.count == 10)
             #expect(page.total == 25, "the count ignores limit and offset")
@@ -94,11 +101,12 @@ struct PaginationIntegrationTests {
 
     @Test("the count respects the predicate, not just the table")
     func countRespectsPredicate() async throws {
-        try await withRepo { repo in
-            try await seed(repo, count: 25)
+        try await withSandbox { repo in
+            let owner = try await seed(repo, count: 25)
 
             let page = try await repo.page(
-                Post.where { $0.published == true }.order { $0.viewCount.asc() },
+                Post.where { $0.authorID == owner && $0.published == true }
+                    .order { $0.viewCount.asc() },
                 PageRequest(page: 1, perPage: 5))
 
             // 13 of 25 have an even viewCount.
@@ -110,11 +118,12 @@ struct PaginationIntegrationTests {
 
     @Test("the last page is short, and knows it is last")
     func shortLastPage() async throws {
-        try await withRepo { repo in
-            try await seed(repo, count: 25)
+        try await withSandbox { repo in
+            let owner = try await seed(repo, count: 25)
 
             let page = try await repo.page(
-                Post.all.order { $0.viewCount.asc() }, PageRequest(page: 3, perPage: 10))
+                Post.where { $0.authorID == owner }.order { $0.viewCount.asc() },
+                PageRequest(page: 3, perPage: 10))
 
             #expect(page.items.count == 5)
             #expect(page.isLast && !page.hasNext)
@@ -124,9 +133,10 @@ struct PaginationIntegrationTests {
 
     @Test("a page past the end is empty rather than an error")
     func pastTheEnd() async throws {
-        try await withRepo { repo in
-            try await seed(repo, count: 5)
-            let page = try await repo.page(Post.all, PageRequest(page: 99, perPage: 10))
+        try await withSandbox { repo in
+            let owner = try await seed(repo, count: 5)
+            let page = try await repo.page(
+                Post.where { $0.authorID == owner }, PageRequest(page: 99, perPage: 10))
             #expect(page.items.isEmpty)
             #expect(page.total == 5)
             #expect(!page.hasNext)
@@ -135,14 +145,15 @@ struct PaginationIntegrationTests {
 
     @Test("an unordered query still paginates without repeating rows")
     func unorderedIsStable() async throws {
-        try await withRepo { repo in
-            try await seed(repo, count: 30)
+        try await withSandbox { repo in
+            let owner = try await seed(repo, count: 30)
 
             // No .order at all — pagination imposes the primary key so pages
             // partition the result set instead of overlapping.
             var seen: Set<UUID> = []
             for number in 1...3 {
-                let page = try await repo.page(Post.all, PageRequest(page: number, perPage: 10))
+                let page = try await repo.page(
+                    Post.where { $0.authorID == owner }, PageRequest(page: number, perPage: 10))
                 for item in page.items { seen.insert(item.id) }
             }
             #expect(seen.count == 30, "three pages of ten must be thirty distinct rows")
@@ -151,11 +162,13 @@ struct PaginationIntegrationTests {
 
     @Test("projections paginate too")
     func projections() async throws {
-        try await withRepo { repo in
-            try await seed(repo, count: 12)
+        try await withSandbox { repo in
+            let owner = try await seed(repo, count: 12)
 
             let page = try await repo.page(
-                Post.all.order { $0.viewCount.asc() }.select { ($0.title, $0.viewCount) },
+                Post.where { $0.authorID == owner }
+                    .order { $0.viewCount.asc() }
+                    .select { ($0.title, $0.viewCount) },
                 PageRequest(page: 2, perPage: 5))
 
             #expect(page.items.count == 5)
@@ -163,4 +176,5 @@ struct PaginationIntegrationTests {
             #expect(page.items.first?.1 == 5)
         }
     }
+}
 }

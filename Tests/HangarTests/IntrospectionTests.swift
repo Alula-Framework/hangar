@@ -222,8 +222,13 @@ struct EntityGeneratorTests {
     }
 }
 
+// Parallelized (testing plan, Phase 3) without needing a sandbox: these read
+// `pg_catalog` definitions, not rows, so there was never anything to isolate —
+// `withIntrospector` simply used to take the shared lock like everything else.
+// `.serialized` dropped for the same reason. Assertions use `contains`, so they
+// are unaffected by DDL another suite performs on its own tables.
 @Suite(
-    "Introspection against Postgres", .serialized,
+    "Introspection against Postgres",
     .enabled(if: TestDatabase.isConfigured, "set HANGAR_TEST_DATABASE_URL to run"))
 struct SchemaIntrospectorTests {
 

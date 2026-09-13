@@ -58,13 +58,16 @@ struct NullableForeignKeyPredicateTests {
     }
 }
 
-extension PostgresIntegrationSuite {
-    @Suite("Has-many over a nullable foreign key (real Postgres)")
+// Sandboxed (testing plan, Phase 3). The orphans test scoped to the two authors
+// it creates — it asserted an exact whole-table author list, which only held
+// because withRepo truncated first.
+extension SandboxedIntegrationSuite {
+    @Suite("Has-many over a nullable foreign key (real Postgres, sandboxed)")
     struct NullableHasManyTests {
 
         @Test("children whose foreign key is NULL belong to no parent")
         func nullChildrenAreOrphans() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let ada = try await repo.insert(Author(id: UUID(), name: "Ada"))
                 let grace = try await repo.insert(Author(id: UUID(), name: "Grace"))
                 let post = try await repo.insert(Post.sample())
@@ -80,7 +83,8 @@ extension PostgresIntegrationSuite {
                 _ = try await repo.insert(comment("unmoderated", moderator: nil))
 
                 let authors = try await repo.all(
-                    Author.all.order { $0.name.asc() }
+                    Author.where { $0.id.in([ada.id, grace.id]) }
+                        .order { $0.name.asc() }
                         .preload(\.moderated) { $0.order { $0.body.asc() } })
 
                 #expect(authors.map(\.name) == ["Ada", "Grace"])
@@ -95,7 +99,7 @@ extension PostgresIntegrationSuite {
 
         @Test("a parent with no children loads as empty, not as not-loaded")
         func emptyIsLoaded() async throws {
-            try await withRepo { repo in
+            try await withSandbox { repo in
                 let lonely = try await repo.insert(Author(id: UUID(), name: "Lonely"))
                 let authors = try await repo.all(
                     Author.where { $0.id == lonely.id }.preload(\.moderated))
