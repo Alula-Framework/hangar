@@ -4,6 +4,41 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-17
+
+Transactional test isolation, as a shipped product. Additive: nothing in the
+`Hangar` library itself changed, so upgrading cannot alter query behaviour.
+
+### Added
+
+- **`HangarTesting`** — a new library product carrying
+  `withSandbox(_:logger:diagnostics:_:)`. It runs a body with a `Repo` pinned to
+  one connection inside a transaction that is **always rolled back**, which is
+  the Swift equivalent of Ecto's `Ecto.Adapters.SQL.Sandbox`: isolation comes
+  from nothing ever being committed rather than from emptying shared tables
+  between tests. Two things follow — there is no cleanup step, and because no
+  test mutates shared state, suites can run **in parallel**.
+
+  It is safe because the repo is built at transaction depth 1, so a
+  `repo.transaction { }` inside the body renders as
+  `SAVEPOINT`/`RELEASE`/`ROLLBACK TO` rather than `BEGIN`/`COMMIT` — code under
+  test cannot commit its way out of the sandbox, not even by opening its own
+  transaction.
+
+  Its own product, deliberately: a release build should never link a helper
+  whose purpose is rolling transactions back.
+
+  The doc comment carries what a sandbox *cannot* test, because each case is a
+  green-but-wrong hazard rather than a failure: serialization retry never fires
+  at depth ≥ 1; anything needing a second connection cannot see uncommitted
+  rows; a test whose subject is commit durability keeps passing while measuring
+  something else; sequences do not roll back; and a statement provoking a server
+  error poisons the transaction (`SQLSTATE 25P02`), so every query after it
+  throws.
+
+  Assertions must be scoped to the rows a test created — a sandbox empties
+  nothing, so committed rows remain visible.
+
 ## [0.5.1] - 2026-09-08
 
 Documentation only.
