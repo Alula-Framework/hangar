@@ -303,11 +303,18 @@ struct StoredFile {
 }
 ```
 
-Reads exclude deleted rows, `repo.delete` stamps the column instead of
-issuing a `DELETE`, and `repo.restore` brings a row back. The exclusion is
+Reads exclude deleted rows, `repo.delete(model)` stamps the column instead of
+issuing a `DELETE`, and `repo.restore` brings a row back. The *exclusion* is
 applied to the query rather than to each statement kind, so `select`, `count`,
 `exists`, set-based `update` and `delete`, and preloaded associations all
-inherit it. The escape hatches are named: `withDeleted()`, `onlyDeleted()`,
+inherit it.
+
+The *stamping* is not: `repo.delete(query)` — the set-based overload — issues a
+real `DELETE` even for a soft-deletable entity. That is deliberate and the
+retention purge below depends on it, since a scheduled job clearing rows past a
+cutoff has nothing left to stamp. But it means one method name does two
+different things depending on whether you hand it a model or a query, so reach
+for the set-based form only when you mean it. The escape hatches are named: `withDeleted()`, `onlyDeleted()`,
 `forceDelete()` — spelled either on a query (`StoredFile.all.onlyDeleted()`)
 or straight on the entity (`StoredFile.onlyDeleted()`).
 

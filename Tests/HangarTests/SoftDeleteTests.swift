@@ -228,5 +228,30 @@ struct SoftDeleteTests {
             #expect(all.first { $0.id == doomed.id }?.sizeBytes == 20)
         }
     }
+
+    @Test("a set-based delete removes rows outright, unlike deleting a model")
+    func setBasedDeleteIsNotASoftDelete() async throws {
+        // The one seam in the soft-delete policy that does NOT stamp, and it
+        // had no test: `repo.delete(model)` stamps, `repo.delete(query)`
+        // issues a real DELETE. The divergence is deliberate — the retention
+        // purge in the README is a set-based delete over `onlyDeleted()`, and
+        // a job clearing rows past a cutoff has nothing left to stamp — but
+        // one method name doing two things needs pinning, not assuming.
+        try await withSandbox { repo in
+            let (owner, keeper, doomed) = try await seed(repo)
+            let mine = StoredFile.where { $0.ownerID == owner }
+
+            try await repo.delete(doomed)
+            #expect(try await repo.count(mine.onlyDeleted()) == 1, "the model overload stamps")
+
+            // Now purge the stamped row the way the README's retention example
+            // does. If this ever started stamping instead, the purge would
+            // silently never remove anything and the table would grow forever.
+            let removed = try await repo.delete(mine.onlyDeleted())
+            #expect(removed == 1, "the set-based overload reports rows removed, not rows stamped")
+            #expect(try await repo.count(mine.withDeleted()) == 1, "only the keeper is left")
+            #expect(try await repo.all(mine).first?.id == keeper.id)
+        }
+    }
 }
 }
