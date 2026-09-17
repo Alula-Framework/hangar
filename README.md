@@ -27,7 +27,7 @@ let popular = try await repo.all(
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Flight-Framework/hangar", from: "0.3.0")
+    .package(url: "https://github.com/Flight-Framework/hangar", from: "0.6.0")
 ]
 ```
 
@@ -45,7 +45,24 @@ let recent = base.order { $0.createdAt.desc() }.limit(10)
 let byAuthor = base.where { $0.authorID == id }      // `base` is unchanged
 ```
 
-Composition never mutates what it was composed from.
+Composition never mutates what it was composed from. Because `where` is an
+ordinary `(Query) -> Query` function, it folds over a collection like any
+other value — a `reduce` over filter cases works as well as an `if let`
+chain:
+
+```swift
+enum PostFilter { case published, author(UUID), search(String) }
+
+let filters: [PostFilter] = [.published, .author(currentUserID)]
+
+let q = filters.reduce(Post.all) { q, filter in
+    switch filter {
+    case .published:        q.where { $0.published }
+    case .author(let id):   q.where { $0.authorID == id }
+    case .search(let term): q.where { $0.title.ilike("%\(term)%") }
+    }
+}
+```
 
 ## What it does
 
@@ -182,9 +199,9 @@ try await repo.transaction(isolation: .serializable, retryingOnSerializationFail
 }
 ```
 
-**`Multi`** for units of work whose steps are decided before they run —
-Ecto's `Ecto.Multi`, and the shape to reach for when a `transaction { }`
-closure would become a tangle of conditionals:
+**`Multi`** for units of work whose steps are decided before they run — the
+shape to reach for when a `transaction { }` closure would become a tangle of
+conditionals:
 
 ```swift
 enum K {

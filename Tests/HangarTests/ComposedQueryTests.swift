@@ -138,9 +138,12 @@ struct ComposedQueryRendererTests {
         let commentCount: Int
     }
 
-    @Test
-    func test() {
-        let query: ComposedQuery<Post, ComposedQueryRendererTests.PopularPost> = Post.query{q, post in
+    @Test("a grouped, filtered, projected composition renders every clause it was given")
+    func groupedHavingProjectionRenders() {
+        // The annotation is load-bearing: it pins that the composition still
+        // produces a `ComposedQuery<Post, PopularPost>` rather than some other
+        // projection, which a `let` alone would infer away.
+        let query: ComposedQuery<Post, PopularPost> = Post.query { q, post in
             let comment = q.join(Comment.self) { $0.postID == post.id }
             let author = q.join(Author.self) { $0.id == post.authorID }
 
@@ -155,6 +158,18 @@ struct ComposedQueryRendererTests {
                     )
                 }
         }
+
+        // Constructing it proved only that it type-checks. These assert the
+        // clauses actually reach the statement — a projection that silently
+        // dropped its HAVING, or grouped by the wrong columns, would have
+        // compiled and executed just as happily.
+        let sql = query.debugSQL
+        #expect(sql.contains(#"WHERE "t0"."published""#))
+        #expect(sql.contains(#"GROUP BY "t0"."id", "t0"."title", "t2"."name""#))
+        #expect(sql.contains("HAVING"))
+        #expect(sql.contains("count("))
+        #expect(sql.contains(#"JOIN "hangar_comments""#))
+        #expect(sql.contains(#"JOIN "hangar_authors""#))
     }
 
     @Test("groupBy calls accumulate rather than replace, single-arg and multi-arg mixed")
