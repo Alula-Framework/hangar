@@ -21,8 +21,14 @@ docker run -d --name hangar-test \
 export HANGAR_TEST_DATABASE_URL=\
 "postgres://postgres:postgres@localhost:55433/hangar_test?sslmode=disable"
 
-swift test          # all 132
+swift test          # the whole suite — unit and integration
 ```
+
+`swift test`'s own closing line is not the total: it prints one "Test run with
+N tests" per bundle, and the one that finishes last here reports **0**. That
+number said `132` in this file for a long time while the suite was 325
+swift-testing tests plus 88 XCTest. `CI/run-tests.sh` sums every bundle and
+prints an accurate figure; prefer it when you want to know what ran.
 
 > The integration suite drops and recreates its fixture tables. Point it at a
 > database you care about and it will delete things.

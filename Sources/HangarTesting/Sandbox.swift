@@ -34,9 +34,15 @@ import Hangar
 /// The repo is constructed with `inTransaction: true`, which places it at
 /// transaction depth 1. A `repo.transaction { }` inside `body` therefore renders
 /// as `SAVEPOINT` / `RELEASE` / `ROLLBACK TO` rather than `BEGIN` / `COMMIT`, so
-/// **code under test cannot commit its way out of the sandbox** — not even by
-/// opening its own transaction. Without that property this helper would be
-/// unsound rather than merely convenient.
+/// **code under test cannot commit its way out by opening its own transaction**.
+/// Without that property this helper would be unsound rather than merely
+/// convenient.
+///
+/// It is not a sandbox against arbitrary SQL, and this doc comment used to say
+/// it was. `repo.execute("COMMIT")` ends the enclosing transaction and the rows
+/// survive — verified by execution. The guarantee covers the transaction API,
+/// which is what code under test realistically uses; a deliberate raw `COMMIT`
+/// defeats it.
 ///
 /// ## Scope your assertions
 ///
