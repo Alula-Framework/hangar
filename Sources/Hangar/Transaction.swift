@@ -106,6 +106,12 @@ extension Repo {
     /// attempt limit. Side effects outside the database (a sent email, an
     /// enqueued job) do not roll back; keep them out of retried bodies.
     ///
+    /// Attempts are separated by a short randomised wait — `0...10ms` before
+    /// the first retry, doubling after that — so two transactions that
+    /// conflicted do not retry in lockstep and collide again. Worst case the
+    /// default three attempts add under 30ms; cancellation propagates out of
+    /// the wait rather than being swallowed.
+    ///
     /// Called on a repo already inside a transaction, this does not retry:
     /// a serialization failure dooms the *whole* transaction, and only its
     /// outermost owner can run it again.
@@ -133,10 +139,36 @@ extension Repo {
             } catch let error as PSQLError
                 where attempt < maxAttempts && Self.isRetryableConflict(error)
             {
+                // Wait a jittered moment rather than looping straight back in.
+                //
+                // Two transactions that serialization-conflict are, by
+                // definition, running at the same time. Retrying both the
+                // instant they fail re-runs the same overlap, and under SSI
+                // the second collision is about as likely as the first — so a
+                // pair can spend every attempt aborting each other and report
+                // failure on work that would have succeeded alone. That is not
+                // hypothetical: hangar's own retry test raced this way.
+                //
+                // Full jitter — uniform in `0...ceiling` rather than a fixed
+                // delay — because a fixed backoff keeps the contenders in
+                // lockstep, which is the thing being broken. The ceiling
+                // doubles per attempt, so the default three attempts add under
+                // 30ms in the worst case and usually a few milliseconds.
+                //
+                // Cancellation propagates out of the sleep, which is right: a
+                // cancelled caller should not be held for a retry it no longer
+                // wants.
+                let ceiling = Self.retryBackoffBaseMilliseconds * (1 << (attempt - 1))
+                try await Task.sleep(for: .milliseconds(Int.random(in: 0...ceiling)))
                 attempt += 1
             }
         }
     }
+
+    /// The first retry waits somewhere in `0...10ms`, the second `0...20ms`.
+    /// Small on purpose: serialization contention is short-lived, and this
+    /// sits in a request path.
+    private static let retryBackoffBaseMilliseconds = 10
 
     /// SQLSTATE 40001 (serialization_failure) or 40P01 (deadlock_detected):
     /// the two "run it again" answers Postgres gives.
