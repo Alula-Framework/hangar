@@ -68,6 +68,11 @@ struct TransactionRenderingTests {
 // MARK: - Integration
 
 /// Two tasks that must both pass a point before either proceeds.
+///
+/// One-shot on purpose: the first two arrivals are released together and every
+/// arrival after that passes straight through. A *retried* transaction must not
+/// block here — by then its partner has committed and the second arrival is
+/// never coming.
 private actor Rendezvous {
     private var arrived = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -83,17 +88,56 @@ private actor Rendezvous {
     }
 }
 
+/// A one-way signal: `wait()` returns once `signal()` has been called, then and
+/// forever after.
+private actor Latch {
+    private var open = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        open = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+
+    func wait() async {
+        if open { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
+/// How many times each slot's body ran — the evidence that a retry happened at
+/// all, which "no failures" on its own does not provide.
+private actor AttemptLog {
+    private var counts: [String: Int] = [:]
+    func record(_ slot: String) { counts[slot, default: 0] += 1 }
+    func snapshot() -> [String: Int] { counts }
+}
+
 extension PostgresIntegrationSuite {
     @Suite("Transactions — isolation, retry, escape hatch (real Postgres)")
     struct TransactionFeatureIntegrationTests {
 
-        /// Classic write-skew: both transactions snapshot both rows, then
-        /// each updates the row the *other* read. SERIALIZABLE detects the
-        /// cycle and aborts one with SQLSTATE 40001 at commit.
+        /// Classic write-skew, with the loser *chosen* rather than raced.
+        ///
+        /// Both transactions snapshot both rows, then each updates the row the
+        /// other read — the dependency edge SSI detects. Postgres aborts
+        /// whichever commits second, so letting `a` commit first makes `b` the
+        /// loser on every run.
+        ///
+        /// It used to let them race, and that made this suite's only evidence
+        /// for retry a coin flip. When SSI aborts *both* sides, both retry at
+        /// once, re-enter the same read-both/write-one pattern and conflict
+        /// again — and the wrapper retries immediately with no backoff, so they
+        /// can burn all three attempts against each other. Choosing the loser
+        /// removes the race without weakening anything: the conflict is still
+        /// real, produced by real SSI, and the wrapper under test is untouched.
         private func provokeWriteSkew(
             _ repo: Repo, retryAttempts: Int?
-        ) async throws -> (failures: [String], values: [String]) {
+        ) async throws -> (failures: [String], values: [String], attempts: [String: Int]) {
             let gate = Rendezvous()
+            let aCommitted = Latch()
+            let attemptLog = AttemptLog()
             var sqlStates: [String] = []
 
             await withTaskGroup(of: (any Error)?.self) { group in
@@ -101,12 +145,17 @@ extension PostgresIntegrationSuite {
                     group.addTask {
                         do {
                             let body: @Sendable (Repo) async throws -> Void = { tx in
+                                await attemptLog.record(slot)
                                 // Read BOTH rows, then write only ours —
                                 // the other row's read is the dependency
                                 // edge SSI detects.
                                 let rows = try await tx.all(KV.all)
                                 let total = rows.map(\.value).joined()
                                 await gate.arrive()
+                                // Both snapshots are taken. `b` now waits for
+                                // `a` to commit, so `b` is the second committer
+                                // and therefore the one SSI aborts.
+                                if slot == "b" { await aCommitted.wait() }
                                 _ = try await tx.update(KV.where { $0.key == slot }) {
                                     $0.value.set(to: "\(slot):saw-\(total.count)")
                                 }
@@ -119,8 +168,13 @@ extension PostgresIntegrationSuite {
                             } else {
                                 try await repo.transaction(isolation: .serializable, body)
                             }
+                            // After the transaction returns, so the commit has
+                            // actually happened. Signalled on the failure path
+                            // too — otherwise a failing `a` parks `b` forever.
+                            if slot == "a" { await aCommitted.signal() }
                             return nil
                         } catch {
+                            if slot == "a" { await aCommitted.signal() }
                             return error
                         }
                     }
@@ -136,7 +190,7 @@ extension PostgresIntegrationSuite {
                 }
             }
             let values = try await repo.all(KV.all.order { $0.key.asc() }).map(\.value)
-            return (sqlStates, values)
+            return (sqlStates, values, await attemptLog.snapshot())
         }
 
         @Test("serializable contention surfaces SQLSTATE 40001 without retry")
@@ -144,8 +198,11 @@ extension PostgresIntegrationSuite {
             try await withRepo { repo in
                 try await repo.insert(KV(key: "a", value: "0"))
                 try await repo.insert(KV(key: "b", value: "0"))
-                let (failures, _) = try await provokeWriteSkew(repo, retryAttempts: nil)
+                let (failures, _, attempts) = try await provokeWriteSkew(repo, retryAttempts: nil)
                 #expect(failures == ["40001"], "exactly one side should fail, with 40001")
+                // Without a retry wrapper each body runs exactly once. If this
+                // ever reads higher, something is retrying that should not be.
+                #expect(attempts == ["a": 1, "b": 1])
             }
         }
 
@@ -154,10 +211,19 @@ extension PostgresIntegrationSuite {
             try await withRepo { repo in
                 try await repo.insert(KV(key: "a", value: "0"))
                 try await repo.insert(KV(key: "b", value: "0"))
-                let (failures, values) = try await provokeWriteSkew(repo, retryAttempts: 3)
+                let (failures, values, attempts) = try await provokeWriteSkew(repo, retryAttempts: 3)
                 #expect(failures.isEmpty, "both sides should succeed after retry")
                 #expect(values.count == 2)
                 #expect(values.allSatisfy { $0.contains("saw-") })
+                // The assertions above pass just as happily if no conflict ever
+                // occurred — "nothing failed" is not evidence that a retry
+                // recovered anything, and this is the only test that covers a
+                // feature whose CHANGELOG records it having shipped inert. `b`
+                // is the chosen loser, so its body must have run at least twice.
+                #expect(
+                    attempts["b", default: 0] >= 2,
+                    "b must actually have been aborted and retried, not merely have succeeded")
+                #expect(attempts["a", default: 0] == 1, "a commits first and is never retried")
             }
         }
 
