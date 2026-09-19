@@ -7,6 +7,9 @@
 struct WindowSpecification: Sendable {
     var partitions: [SQLExpression] = []
     var orderings: [OrderTerm] = []
+    /// The frame clause, already rendered — `ROWS BETWEEN … AND …`. Built
+    /// from ``FrameStart``/``FrameEnd``, which carry no caller values.
+    var frame: String?
 }
 
 indirect enum SQLExpression: Sendable {

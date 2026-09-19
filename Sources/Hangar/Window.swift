@@ -7,16 +7,87 @@
 // `sum().over { … }` answers "of the rows I am windowed with", from the same
 // call site.
 //
-// **Not here yet:** frame clauses (`ROWS BETWEEN …`). A window without a frame
-// is the whole partition, which is what running totals and rankings need; a
-// moving average needs a frame and cannot be expressed today. Additive when it
-// lands — it is another clause inside the parentheses, not a new shape.
-//
 // **A window function belongs in the SELECT list.** Postgres rejects one in
 // `WHERE`, `GROUP BY` or `HAVING`, and so will your build — at the server
 // rather than the compiler, because `SelectExpression` carries the comparison
 // operators that `having` is built from and separating the two types would
 // cost more than the mistake does.
+
+/// Where a frame starts.
+///
+/// Split from ``FrameEnd`` because two of Postgres's three frame errors are
+/// about which keyword may appear on which side:
+///
+///     ERROR:  frame start cannot be UNBOUNDED FOLLOWING
+///     ERROR:  frame end cannot be UNBOUNDED PRECEDING
+///
+/// Neither is spellable here. The third — a start *after* the end, such as
+/// `1 FOLLOWING` to `1 PRECEDING` — depends on the offsets rather than the
+/// keywords, and Postgres reports it as "frame starting from following row
+/// cannot have preceding rows".
+public enum FrameStart: Sendable {
+    /// Every row from the start of the partition.
+    case unboundedPreceding
+    /// `n` rows back from the current one.
+    case preceding(Int)
+    /// The current row.
+    case currentRow
+    /// `n` rows forward from the current one.
+    case following(Int)
+
+    var sql: String {
+        switch self {
+        case .unboundedPreceding: "UNBOUNDED PRECEDING"
+        case .preceding(let n): "\(n) PRECEDING"
+        case .currentRow: "CURRENT ROW"
+        case .following(let n): "\(n) FOLLOWING"
+        }
+    }
+
+    /// Declared only to be unavailable: without it the mistake is "type
+    /// 'FrameStart' has no member", which is true and unhelpful.
+    @available(
+        *, unavailable,
+        message: """
+            A frame cannot start at UNBOUNDED FOLLOWING — Postgres rejects it with
+            "frame start cannot be UNBOUNDED FOLLOWING". A frame starts at or before
+            it ends: use .unboundedPreceding, .preceding(n), .currentRow or
+            .following(n), and put UNBOUNDED FOLLOWING on the `to:` side.
+            """
+    )
+    public static var unboundedFollowing: FrameStart { fatalError("unavailable") }
+}
+
+/// Where a frame ends. See ``FrameStart`` for why the two are different types.
+public enum FrameEnd: Sendable {
+    case preceding(Int)
+    case currentRow
+    case following(Int)
+    /// Every row to the end of the partition.
+    case unboundedFollowing
+
+    var sql: String {
+        switch self {
+        case .preceding(let n): "\(n) PRECEDING"
+        case .currentRow: "CURRENT ROW"
+        case .following(let n): "\(n) FOLLOWING"
+        case .unboundedFollowing: "UNBOUNDED FOLLOWING"
+        }
+    }
+
+    /// See ``FrameStart/unboundedFollowing``: the mirror mistake, and the
+    /// mirror message.
+    @available(
+        *, unavailable,
+        message: """
+            A frame cannot end at UNBOUNDED PRECEDING — Postgres rejects it with
+            "frame end cannot be UNBOUNDED PRECEDING". A frame ends at or after it
+            starts: use .preceding(n), .currentRow, .following(n) or
+            .unboundedFollowing, and put UNBOUNDED PRECEDING on the `from:` side.
+            """
+    )
+    public static var unboundedPreceding: FrameEnd { fatalError("unavailable") }
+}
 
 /// Which rows a window function reads, and in what order.
 ///
@@ -47,6 +118,46 @@ public struct Window: Sendable {
     public func order(_ term: OrderTerm) -> Window {
         var copy = self
         copy.specification.orderings.append(term)
+        return copy
+    }
+
+    /// `ROWS BETWEEN … AND …` — a frame counted in physical rows.
+    ///
+    /// This is what a moving average needs, and the reason it could not be
+    /// written before: without a frame a window is the whole partition, so
+    /// `avg()` over it is one number repeated, not a trailing average.
+    ///
+    /// ```swift
+    /// // The average of this row and the two before it.
+    /// p.viewCount.avg().over {
+    ///     $0.order(p.createdAt.asc()).rows(from: .preceding(2))
+    /// }
+    /// ```
+    ///
+    /// The end defaults to the current row, which is what "so far" means in
+    /// a running total or trailing average.
+    public func rows(from start: FrameStart, to end: FrameEnd = .currentRow) -> Window {
+        framed("ROWS", start, end)
+    }
+
+    /// `RANGE BETWEEN … AND …` — a frame counted in *peers*, meaning rows the
+    /// window's `ORDER BY` cannot tell apart.
+    ///
+    /// With ties this differs from ``rows(from:to:)``: `ROWS` takes the row
+    /// physically before, `RANGE` takes every row sharing the current one's
+    /// ordering value. An offset here is an offset in the ordering column's
+    /// own units, so Postgres requires exactly one `ORDER BY` column for it.
+    public func range(from start: FrameStart, to end: FrameEnd = .currentRow) -> Window {
+        framed("RANGE", start, end)
+    }
+
+    private func framed(_ mode: String, _ start: FrameStart, _ end: FrameEnd) -> Window {
+        var copy = self
+        // Offsets render literally, like LIMIT and OFFSET and for the same
+        // reason: they are Ints this package writes into the statement, never
+        // a caller's value reaching the text. A negative one is rejected by
+        // Postgres ("frame starting offset must not be negative").
+        copy.specification.frame = "\(mode) BETWEEN \(start.sql) AND \(end.sql)"
         return copy
     }
 }

@@ -32,6 +32,8 @@ Aggregate functions are not allowed in WHERE
 Window functions are not allowed in WHERE or HAVING
 .groupBy { $0.someColumn }.having { ... }
 A grouped query has no whole rows to fetch
+A frame cannot start at UNBOUNDED FOLLOWING
+A frame cannot end at UNBOUNDED PRECEDING
 PHRASES
 
 if [ $missing -ne 0 ]; then

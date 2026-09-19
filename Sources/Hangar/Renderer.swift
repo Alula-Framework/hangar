@@ -624,6 +624,7 @@ enum SQLRenderer {
                     .joined(separator: ", ")
                 clauses.append("ORDER BY \(terms)")
             }
+            if let frame = specification.frame { clauses.append(frame) }
             return "\(function) OVER (\(clauses.joined(separator: " ")))"
         case .cast(let operand, let type):
             return "(\(render(operand, writer: &writer)))::\(type)"

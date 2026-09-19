@@ -128,6 +128,42 @@ extension PostgresIntegrationSuite {
             }
         }
 
+        private struct Trailing: Decodable, Equatable {
+            let title: String
+            let trailing: Int?
+        }
+
+        @Test("a frame makes a trailing sum trail — the thing a frameless window cannot do")
+        func trailingSum() async throws {
+            try await withRepo { repo in
+                _ = try await seed(repo)
+                let rows = try await repo.all(
+                    Post.where {
+                        $0.title == "b-low" || $0.title == "b-mid" || $0.title == "b-high"
+                    }
+                    .select(into: Trailing.self) { post in
+                        (
+                            title: post.title,
+                            // This row and the one before it, in view order.
+                            trailing: post.viewCount.sum().over {
+                                $0.order(post.viewCount.asc()).rows(from: .preceding(1))
+                            }
+                        )
+                    }
+                    .order { $0.viewCount.asc() })
+
+                // 20, then 20+25, then 25+40 — not the running total, and not
+                // the partition total repeated, which is what it would be
+                // without the frame.
+                #expect(
+                    rows == [
+                        Trailing(title: "b-low", trailing: 20),
+                        Trailing(title: "b-mid", trailing: 45),
+                        Trailing(title: "b-high", trailing: 65),
+                    ])
+            }
+        }
+
         @Test("an empty window sees every row the query returned")
         func emptyWindowCountsEverything() async throws {
             try await withRepo { repo in

@@ -65,6 +65,51 @@ struct WindowRenderingTests {
                 .contains(#"OVER (ORDER BY "nickname" ASC NULLS LAST)"#))
     }
 
+    @Test("a frame renders after the ordering, and only when asked")
+    func frameRenders() {
+        let unframed = Post.select(into: Row.self) { post in
+            (title: post.title, rank: post.viewCount.sum().over { $0.order(post.createdAt.asc()) })
+        }
+        #expect(!SQLRenderer.select(unframed).sql.contains("ROWS BETWEEN"))
+
+        let trailing = Post.select(into: Row.self) { post in
+            (
+                title: post.title,
+                rank: post.viewCount.sum().over {
+                    $0.order(post.createdAt.asc()).rows(from: .preceding(2))
+                }
+            )
+        }
+        #expect(
+            SQLRenderer.select(trailing).sql.contains(
+                #"OVER (ORDER BY "created_at" ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)"#))
+
+        let whole = Post.select(into: Row.self) { post in
+            (
+                title: post.title,
+                rank: post.viewCount.sum().over {
+                    $0.order(post.createdAt.asc())
+                        .rows(from: .unboundedPreceding, to: .unboundedFollowing)
+                }
+            )
+        }
+        #expect(
+            SQLRenderer.select(whole).sql.contains(
+                "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING"))
+
+        let peers = Post.select(into: Row.self) { post in
+            (
+                title: post.title,
+                rank: post.viewCount.sum().over {
+                    $0.order(post.viewCount.asc()).range(from: .unboundedPreceding)
+                }
+            )
+        }
+        #expect(
+            SQLRenderer.select(peers).sql.contains(
+                "RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"))
+    }
+
     @Test("lag and lead bind their offset rather than inlining it")
     func lagBindsItsOffset() {
         let query = Post.select(into: Lagged.self) { post in

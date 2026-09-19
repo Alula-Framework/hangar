@@ -138,7 +138,19 @@ try await repo.all(
 have no meaning outside a window, so they return a value whose only method is
 `.over` — the invalid form is unspellable rather than a runtime error. An empty
 `.over()` is the whole result set, which is how `count().over()` puts the total
-beside each row. Frame clauses (`ROWS BETWEEN`) are not here yet.
+beside each row.
+
+Frames say which rows around this one the function reads, which is what a
+trailing average needs — without one the window is the whole partition:
+
+```swift
+// This row and the two before it, in date order.
+p.viewCount.avg().over { $0.order(p.createdAt.asc()).rows(from: .preceding(2)) }
+```
+
+`rows` counts physical rows and `range` counts peers (rows the ordering cannot
+tell apart). Start and end are separate types, so a frame starting at
+`UNBOUNDED FOLLOWING` — or ending at `UNBOUNDED PRECEDING` — does not compile.
 
 **Joins**, inner and left, with the base entity's columns qualified —
 including self-joins through table aliases:

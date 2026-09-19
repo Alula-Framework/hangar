@@ -33,3 +33,13 @@ func windowInWhere() -> Query<Widget, Widget> {
 func groupedFetchedWhole(repo: Repo) async throws -> [Widget] {
     try await repo.all(Widget.groupBy { $0.ownerID })
 }
+
+// ERROR: frame start cannot be UNBOUNDED FOLLOWING
+func frameStartsAtUnboundedFollowing() -> Window {
+    Window().rows(from: .unboundedFollowing)
+}
+
+// ERROR: frame end cannot be UNBOUNDED PRECEDING
+func frameEndsAtUnboundedPreceding() -> Window {
+    Window().rows(from: .currentRow, to: .unboundedPreceding)
+}
