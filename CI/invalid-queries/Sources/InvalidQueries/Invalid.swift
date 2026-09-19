@@ -27,3 +27,9 @@ func windowInHaving() -> Query<Widget, Widget> {
 func windowInWhere() -> Query<Widget, Widget> {
     Widget.where { $0.viewCount.sum().over() > 5 }
 }
+
+// ERROR: column "..." must appear in the GROUP BY clause or be used in an
+// aggregate function — fetching whole rows from a grouped query.
+func groupedFetchedWhole(repo: Repo) async throws -> [Widget] {
+    try await repo.all(Widget.groupBy { $0.ownerID })
+}

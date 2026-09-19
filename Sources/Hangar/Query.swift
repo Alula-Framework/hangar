@@ -115,7 +115,9 @@ extension Table {
     }
 
     /// `Self.groupBy { }` — sugar for `all.groupBy { }`.
-    public static func groupBy<V>(_ build: (QueryColumns) -> Column<V>) -> Query<Self, Self> {
+    public static func groupBy<V>(_ build: (QueryColumns) -> Column<V>) -> Query<
+        Self, Grouped<Self>
+    > {
         all.groupBy(build)
     }
 
@@ -227,9 +229,40 @@ extension Query {
     }
 
     /// Appends a GROUP BY column; chained calls group by several.
-    public func groupBy<V>(_ build: (Model.QueryColumns) -> Column<V>) -> Query<Model, Result> {
-        var next = self
-        next.grouping.append(build(Model.queryColumns).expression)
+    public func groupBy<V>(_ build: (Model.QueryColumns) -> Column<V>) -> Query<
+        Model, Grouped<Model>
+    >
+    where Result == Model {
+        retypedForGrouping(adding: build(Model.queryColumns).expression)
+    }
+
+    /// Chaining a second grouping column onto an already-grouped query.
+    public func groupBy<V>(_ build: (Model.QueryColumns) -> Column<V>) -> Query<
+        Model, Grouped<Model>
+    >
+    where Result == Grouped<Model> {
+        retypedForGrouping(adding: build(Model.queryColumns).expression)
+    }
+
+    /// Carries every clause across the `Result` change. There is no selection
+    /// to carry: `groupBy` is only available before one is set, which is what
+    /// keeps this from dropping a projection silently.
+    private func retypedForGrouping(adding expression: SQLExpression)
+        -> Query<Model, Grouped<Model>>
+    {
+        var next = Query<Model, Grouped<Model>>()
+        next.predicate = predicate
+        next.orderings = orderings
+        next.rowLimit = rowLimit
+        next.rowOffset = rowOffset
+        next.grouping = grouping + [expression]
+        next.having = having
+        next.isDistinct = isDistinct
+        next.distinctOn = distinctOn
+        next.rowLock = rowLock
+        next.deletedRows = deletedRows
+        next.ctes = ctes
+        next.fromCTE = fromCTE
         return next
     }
 

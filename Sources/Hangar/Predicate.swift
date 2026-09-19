@@ -323,3 +323,18 @@ extension Column where Value == String? {
         Predicate(expression: .infix("ILIKE", expression, .bind(SQLBind(pattern))))
     }
 }
+
+/// The `Result` of a grouped query that has not chosen its columns yet.
+///
+/// A `GROUP BY` collapses rows, so "give me the whole model" stops being a
+/// question the database can answer:
+///
+///     ERROR:  column "title" must appear in the GROUP BY clause or be used
+///             in an aggregate function
+///
+/// Grouping therefore changes the result type to this one, which nothing
+/// decodes. `select(into:)` and `select(_:)` move it to a type that does, and
+/// `count` and `exists` take it as it is — they ask about the groups, not the
+/// columns. Fetching it whole is the one thing it will not do, and `Repo`
+/// carries unavailable overloads that say so in those words.
+public struct Grouped<Model: Table>: Sendable {}

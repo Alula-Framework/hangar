@@ -108,8 +108,23 @@ public struct Repo: Sendable {
     /// Full-model fetch: decodes rows, then runs the query's preloads
     /// — one batched query per association, grouped and assigned
     /// into each model's `Loadable`.
+    // swift-format's AmbiguousTrailingClosureOverload rule has no opinion here,
+    // but the shape is the same one used for `where`: an overload that exists
+    // only to be chosen for the wrong argument and refuse it by name.
+    @available(
+        *, unavailable,
+        message: """
+            A grouped query has no whole rows to fetch — GROUP BY collapses them, and             Postgres answers "column ... must appear in the GROUP BY clause or be used in             an aggregate function". Choose the columns instead:             `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`, or ask             about the groups with `count` / `exists`.
+            """
+    )
+    public func all<M: Table>(_ query: Query<M, Grouped<M>>) async throws -> [M] {
+        fatalError("unavailable")
+    }
+
     public func all<M: Table>(_ query: Query<M, M>) async throws -> [M] {
-        var models: [M] = try await rows(for: SQLRenderer.select(query), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        var models: [M] = try await rows(
+            for: SQLRenderer.select(query), intent: query.rowLock == nil ? .read : .write,
+            operation: "select")
         for step in query.preloads {
             try await step.run(&models, self)
         }
@@ -120,7 +135,9 @@ public struct Repo: Sendable {
     /// selection installed the row decoder for it.
     public func all<M, R>(_ query: Query<M, R>) async throws -> [R] {
         let selection = try validatedSelection(of: query)
-        let sequence = try await execute(SQLRenderer.select(query).postgresQuery(), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        let sequence = try await execute(
+            SQLRenderer.select(query).postgresQuery(),
+            intent: query.rowLock == nil ? .read : .write, operation: "select")
         var results: [R] = []
         for try await row in sequence {
             results.append(try selection.decode(row))
@@ -130,8 +147,23 @@ public struct Repo: Sendable {
 
     /// At most one row, or `nil`. More than one match is an error, not a
     /// silent first-row pick. Preloads apply to the returned model.
+    // swift-format's AmbiguousTrailingClosureOverload rule has no opinion here,
+    // but the shape is the same one used for `where`: an overload that exists
+    // only to be chosen for the wrong argument and refuse it by name.
+    @available(
+        *, unavailable,
+        message: """
+            A grouped query has no whole rows to fetch — GROUP BY collapses them, and             Postgres answers "column ... must appear in the GROUP BY clause or be used in             an aggregate function". Choose the columns instead:             `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`, or ask             about the groups with `count` / `exists`.
+            """
+    )
+    public func one<M: Table>(_ query: Query<M, Grouped<M>>) async throws -> M? {
+        fatalError("unavailable")
+    }
+
     public func one<M: Table>(_ query: Query<M, M>) async throws -> M? {
-        var models: [M] = try await rows(for: SQLRenderer.select(probing(query)), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        var models: [M] = try await rows(
+            for: SQLRenderer.select(probing(query)), intent: query.rowLock == nil ? .read : .write,
+            operation: "select")
         guard models.count <= 1 else {
             throw HangarError.tooManyRows(table: M.schema.name)
         }
@@ -193,10 +225,13 @@ public struct Repo: Sendable {
         _ query: Query<M, M>,
         _ body: (PostgresRowStream<M>) async throws -> T
     ) async throws -> T {
-        let rows = try await execute(SQLRenderer.select(query).postgresQuery(), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        let rows = try await execute(
+            SQLRenderer.select(query).postgresQuery(),
+            intent: query.rowLock == nil ? .read : .write, operation: "select")
         let lease = StreamLease()
         defer { lease.expire() }
-        return try await body(PostgresRowStream(rows: rows, decode: { try M(from: $0) }, lease: lease))
+        return try await body(
+            PostgresRowStream(rows: rows, decode: { try M(from: $0) }, lease: lease))
     }
 
     /// Streams a projection, decoding one row at a time.
@@ -205,7 +240,9 @@ public struct Repo: Sendable {
         _ body: (PostgresRowStream<R>) async throws -> T
     ) async throws -> T {
         let selection = try validatedSelection(of: query)
-        let rows = try await execute(SQLRenderer.select(query).postgresQuery(), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        let rows = try await execute(
+            SQLRenderer.select(query).postgresQuery(),
+            intent: query.rowLock == nil ? .read : .write, operation: "select")
         let lease = StreamLease()
         defer { lease.expire() }
         return try await body(PostgresRowStream(rows: rows, decode: selection.decode, lease: lease))
@@ -215,7 +252,9 @@ public struct Repo: Sendable {
         guard let selection = query.selection else {
             throw HangarError.invalidProjection(
                 table: M.schema.name,
-                reason: "the query's Result is not \(M.self) but no .select {} installed a projection — this is a Hangar bug.")
+                reason:
+                    "the query's Result is not \(M.self) but no .select {} installed a projection — this is a Hangar bug."
+            )
         }
         if let invalid = selection.invalid {
             throw invalid
@@ -226,13 +265,15 @@ public struct Repo: Sendable {
     /// How many rows match the query's conditions. Ordering, limit, and
     /// offset are ignored.
     public func count<M, R>(_ query: Query<M, R>) async throws -> Int {
-        try await scalar(Int.self, for: SQLRenderer.count(query), table: M.schema.name, operation: "count")
+        try await scalar(
+            Int.self, for: SQLRenderer.count(query), table: M.schema.name, operation: "count")
     }
 
     /// Whether any row matches — honoring grouping, having, and distinct,
     /// which can each empty an otherwise-matching set.
     public func exists<M, R>(_ query: Query<M, R>) async throws -> Bool {
-        try await scalar(Bool.self, for: SQLRenderer.exists(query), table: M.schema.name, operation: "exists")
+        try await scalar(
+            Bool.self, for: SQLRenderer.exists(query), table: M.schema.name, operation: "exists")
     }
 
     // MARK: Raw statements — the escape hatch
@@ -273,7 +314,8 @@ public struct Repo: Sendable {
     /// read back via RETURNING.
     @discardableResult
     public func insert<M: Table>(_ model: M) async throws -> M {
-        let returned: [M] = try await rows(for: SQLRenderer.insert(model), intent: .write, operation: "insert")
+        let returned: [M] = try await rows(
+            for: SQLRenderer.insert(model), intent: .write, operation: "insert")
         guard let stored = returned.first else {
             // INSERT... RETURNING yields exactly one row; none means a rule
             // or trigger swallowed the write.
@@ -311,7 +353,8 @@ public struct Repo: Sendable {
     /// if the row no longer exists.
     @discardableResult
     public func update<M: Table>(_ model: M) async throws -> M {
-        let returned: [M] = try await rows(for: SQLRenderer.update(model), intent: .write, operation: "update")
+        let returned: [M] = try await rows(
+            for: SQLRenderer.update(model), intent: .write, operation: "update")
         guard let stored = returned.first else {
             throw HangarError.staleModel(table: M.schema.name)
         }
@@ -338,7 +381,8 @@ public struct Repo: Sendable {
     /// request, a bad import, a test tearing down its fixtures.
     public func forceDelete<M: Table>(_ model: M) async throws {
         let statement = try SQLRenderer.delete(model)
-        let sequence = try await execute(statement.postgresQuery(), intent: .write, operation: "delete")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .write, operation: "delete")
         var deleted = 0
         for try await _ in sequence { deleted += 1 }
         guard deleted > 0 else {
@@ -406,7 +450,8 @@ public struct Repo: Sendable {
             assignments.append(assignment._assignment)
         }
         let statement = try SQLRenderer.update(query, set: assignments)
-        let sequence = try await execute(statement.postgresQuery(), intent: .write, operation: "update")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .write, operation: "update")
         var updated = 0
         for try await _ in sequence { updated += 1 }
         return updated
@@ -431,7 +476,8 @@ public struct Repo: Sendable {
     @discardableResult
     public func delete<M: Table, R>(_ query: Query<M, R>) async throws -> Int {
         let statement = try SQLRenderer.delete(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .write, operation: "delete")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .write, operation: "delete")
         var deleted = 0
         for try await _ in sequence { deleted += 1 }
         return deleted
@@ -446,7 +492,8 @@ public struct Repo: Sendable {
     @discardableResult
     public func insert<M: Table>(_ changeset: Changeset<M>) async throws -> M {
         let validated = try changeset.validatedChanges()
-        let returned: [M] = try await rows(for: SQLRenderer.insert(validated, into: M.self), intent: .write, operation: "insert")
+        let returned: [M] = try await rows(
+            for: SQLRenderer.insert(validated, into: M.self), intent: .write, operation: "insert")
         guard let stored = returned.first else {
             throw HangarError.staleModel(table: M.schema.name)
         }
@@ -481,7 +528,8 @@ public struct Repo: Sendable {
         if validated.changedFields.isEmpty, let original = changeset.original {
             return original
         }
-        let returned: [M] = try await rows(for: SQLRenderer.update(validated, into: M.self), intent: .write, operation: "update")
+        let returned: [M] = try await rows(
+            for: SQLRenderer.update(validated, into: M.self), intent: .write, operation: "update")
         guard let stored = returned.first else {
             // An optimistically-locked write that matched nothing is a lost
             // update far more often than a deleted row, and the two are not
@@ -598,7 +646,8 @@ public struct Repo: Sendable {
     private func rows<R: RowDecodable>(
         for statement: RenderedStatement, intent: Intent, operation: String
     ) async throws -> [R] {
-        let sequence = try await execute(statement.postgresQuery(), intent: intent, operation: operation)
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: intent, operation: operation)
         var results: [R] = []
         for try await row in sequence {
             results.append(try R(from: row))
@@ -609,7 +658,8 @@ public struct Repo: Sendable {
     private func scalar<V: PostgresDecodable>(
         _ type: V.Type, for statement: RenderedStatement, table: String, operation: String
     ) async throws -> V {
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: operation)
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: operation)
         for try await row in sequence {
             let cells = row.makeRandomAccess()
             return try _decodeColumn(V.self, from: cells[0], table: table, column: "?column?")

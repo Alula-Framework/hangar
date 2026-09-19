@@ -99,6 +99,23 @@ private func makeJoin<A: Table, B: Table>(
     return query
 }
 
+/// ``makeJoin(_:base:other:condition:)`` for a query that is already grouped:
+/// same construction, a `Result` that still says the rows are collapsed.
+private func makeGroupedJoin<A: Table, B: Table>(
+    _ kind: JoinKind,
+    base: JoinSide<A>,
+    other: JoinSide<B>,
+    condition: (A.QueryColumns, B.QueryColumns) -> Predicate
+) -> JoinedQuery<A, B, Grouped<A>> {
+    var query = JoinedQuery<A, B, Grouped<A>>(
+        kind: kind, onPredicate: condition(base.columns, other.columns))
+    query.baseAlias = base.alias
+    query.joinedAlias = other.alias
+    query.columnsA = base.columns
+    query.columnsB = other.columns
+    return query
+}
+
 extension Table {
     /// `FROM Self JOIN other ON...` — inner join; rows of `Self` that
     /// have a match.
@@ -186,6 +203,35 @@ extension Query {
         on condition: (Model.QueryColumns, B.QueryColumns) -> Predicate
     ) -> JoinedQuery<Model, B, Result> where Result == Model {
         joined(.inner, .plain, condition)
+    }
+
+    /// Joining an already-grouped query. Grouping survives composition into a
+    /// join, so this is valid SQL; the result stays ``Grouped`` because the
+    /// join does not un-collapse the rows.
+    public func join<B: Table>(
+        _ other: B.Type,
+        on condition: (Model.QueryColumns, B.QueryColumns) -> Predicate
+    ) -> JoinedQuery<Model, B, Grouped<Model>> where Result == Grouped<Model> {
+        groupedJoin(.inner, .plain, condition)
+    }
+
+    /// The grouped counterpart of ``joined(_:_:_:)``.
+    private func groupedJoin<B: Table>(
+        _ kind: JoinKind,
+        _ other: JoinSide<B>,
+        _ condition: (Model.QueryColumns, B.QueryColumns) -> Predicate
+    ) -> JoinedQuery<Model, B, Grouped<Model>> where Result == Grouped<Model> {
+        var next: JoinedQuery<Model, B, Grouped<Model>> = makeGroupedJoin(
+            kind, base: JoinSide<Model>.plain, other: other, condition: condition)
+        next.predicate = predicate
+        next.orderings = orderings
+        next.rowLimit = rowLimit
+        next.rowOffset = rowOffset
+        next.grouping = grouping
+        next.having = having
+        next.isDistinct = isDistinct
+        next.deletedRows = deletedRows
+        return next
     }
 
     /// Joins an aliased table onto an already-composed query — required
@@ -297,7 +343,8 @@ extension JoinedQuery {
         var next = self
         let added = build(columnsA, columnsB).predicate
         if let existing = next.predicate {
-            next.predicate = Predicate(expression: .infix("AND", existing.expression, added.expression))
+            next.predicate = Predicate(
+                expression: .infix("AND", existing.expression, added.expression))
         } else {
             next.predicate = added
         }
@@ -329,7 +376,8 @@ extension JoinedQuery {
         var next = self
         let added = build(columnsA, columnsB)._havingPredicate
         if let existing = next.having {
-            next.having = Predicate(expression: .infix("AND", existing.expression, added.expression))
+            next.having = Predicate(
+                expression: .infix("AND", existing.expression, added.expression))
         } else {
             next.having = added
         }
@@ -390,7 +438,8 @@ extension JoinedQuery {
                 var index = 0
                 func next<T: PostgresDecodable>(_ type: T.Type) throws -> T {
                     defer { index += 1 }
-                    return try _decodeColumn(T.self, from: cells[index], table: table, column: "#\(index)")
+                    return try _decodeColumn(
+                        T.self, from: cells[index], table: table, column: "#\(index)")
                 }
                 return (repeat try next((each S).Value.self))
             })
@@ -419,13 +468,17 @@ extension JoinedQuery {
                 guard let label = child.label, !label.hasPrefix(".") else {
                     invalid = .invalidProjection(
                         table: A.schema.name,
-                        reason: "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by.")
+                        reason:
+                            "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by."
+                    )
                     break
                 }
                 guard let selectable = child.value as? any Selectable else {
                     invalid = .invalidProjection(
                         table: A.schema.name,
-                        reason: "select(into:) tuple element '\(label)' is not a column or aggregate expression.")
+                        reason:
+                            "select(into:) tuple element '\(label)' is not a column or aggregate expression."
+                    )
                     break
                 }
                 items.append((selectable._selectFragment.expression, label))
@@ -460,7 +513,8 @@ extension SQLRenderer {
                 table: A.schema.name,
                 reason: A.schema.name == B.schema.name
                     ? "a self-join needs an alias on at least one side: \(A.schema.name).alias(\"parent\").join(\(B.schema.name).alias(\"child\"), on: ...)."
-                    : "both sides of this join are named \"\(effectiveA)\" — give them distinct aliases.")
+                    : "both sides of this join are named \"\(effectiveA)\" — give them distinct aliases."
+            )
         }
         var sql = "FROM \(A.schema.quotedName)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }
@@ -501,11 +555,13 @@ extension SQLRenderer {
         } else {
             list = A.schema.qualifiedSelectList
         }
-        var sql = "SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list)"
+        var sql =
+            "SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list)"
         sql += " \(from)"
         SQLRenderer.appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         if !query.grouping.isEmpty {
-            let terms = query.grouping.map { SQLRenderer.render($0, writer: &writer) }.joined(separator: ", ")
+            let terms = query.grouping.map { SQLRenderer.render($0, writer: &writer) }.joined(
+                separator: ", ")
             sql += " GROUP BY \(terms)"
         }
         if let having = query.having {
@@ -596,7 +652,9 @@ extension Repo {
     /// Base-entity fetch through a join: decodes `A` rows, then runs any
     /// carried preloads.
     public func all<A: Table, B: Table>(_ query: JoinedQuery<A, B, A>) async throws -> [A] {
-        let sequence = try await execute(SQLRenderer.select(query).postgresQuery(), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        let sequence = try await execute(
+            SQLRenderer.select(query).postgresQuery(),
+            intent: query.rowLock == nil ? .read : .write, operation: "select")
         var models: [A] = []
         for try await row in sequence {
             models.append(try A(from: row))
@@ -613,12 +671,16 @@ extension Repo {
         guard let selection = query.selection else {
             throw HangarError.invalidProjection(
                 table: A.schema.name,
-                reason: "the joined query's Result is not \(A.self) but no .select {} installed a projection — this is a Hangar bug.")
+                reason:
+                    "the joined query's Result is not \(A.self) but no .select {} installed a projection — this is a Hangar bug."
+            )
         }
         if let invalid = selection.invalid {
             throw invalid
         }
-        let sequence = try await execute(SQLRenderer.select(query).postgresQuery(), intent: query.rowLock == nil ? .read : .write, operation: "select")
+        let sequence = try await execute(
+            SQLRenderer.select(query).postgresQuery(),
+            intent: query.rowLock == nil ? .read : .write, operation: "select")
         var results: [R] = []
         for try await row in sequence {
             results.append(try selection.decode(row))
@@ -650,10 +712,12 @@ extension Repo {
     /// distinct base rows.
     public func count<A, B, R>(_ query: JoinedQuery<A, B, R>) async throws -> Int {
         let statement = try SQLRenderer.count(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: "count")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: "count")
         for try await row in sequence {
             let cells = row.makeRandomAccess()
-            return try _decodeColumn(Int.self, from: cells[0], table: A.schema.name, column: "count")
+            return try _decodeColumn(
+                Int.self, from: cells[0], table: A.schema.name, column: "count")
         }
         throw HangarError.columnCountMismatch(table: A.schema.name, expected: 1, got: 0)
     }
@@ -661,10 +725,12 @@ extension Repo {
     /// Whether any joined row matches — same clause rules as `count`.
     public func exists<A, B, R>(_ query: JoinedQuery<A, B, R>) async throws -> Bool {
         let statement = try SQLRenderer.exists(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: "exists")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: "exists")
         for try await row in sequence {
             let cells = row.makeRandomAccess()
-            return try _decodeColumn(Bool.self, from: cells[0], table: A.schema.name, column: "exists")
+            return try _decodeColumn(
+                Bool.self, from: cells[0], table: A.schema.name, column: "exists")
         }
         throw HangarError.columnCountMismatch(table: A.schema.name, expected: 1, got: 0)
     }
