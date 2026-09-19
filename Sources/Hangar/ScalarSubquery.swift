@@ -31,14 +31,12 @@ extension Query where Result == Model {
     /// the limit is the difference between "the author's name" and a query
     /// that works until two rows match.
     public func scalar<V>(
-        _ build: (Model.QueryColumns) -> SelectExpression<V>
+        _ build: (Model.QueryColumns) -> some Selectable<V>
     ) -> SelectExpression<V?> {
-        scalarSubquery(selecting: build(Model.queryColumns).expression, limitToOne: true)
-    }
-
-    /// A column of this query as a single projected value.
-    public func scalar<V>(_ build: (Model.QueryColumns) -> Column<V>) -> SelectExpression<V?> {
-        scalarSubquery(selecting: build(Model.queryColumns).expression, limitToOne: true)
+        SelectExpression<V?>(
+            expression: scalarExpression(
+                rendering: build(Model.queryColumns)._selectFragment.expression,
+                limitToOne: true))
     }
 
     /// How many rows this query matches, as a projected column.
@@ -55,13 +53,6 @@ extension Query where Result == Model {
     public func scalarCount() -> SelectExpression<Int> {
         SelectExpression<Int>(
             expression: scalarExpression(overrideList: "count(*)", limitToOne: false))
-    }
-
-    private func scalarSubquery<V>(
-        selecting expression: SQLExpression, limitToOne: Bool
-    ) -> SelectExpression<V?> {
-        SelectExpression<V?>(
-            expression: scalarExpression(rendering: expression, limitToOne: limitToOne))
     }
 
     private func scalarExpression(
