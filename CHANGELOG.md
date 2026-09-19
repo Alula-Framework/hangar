@@ -4,6 +4,91 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-19
+
+Analytic SQL: window functions with frames, set operations, and correlated
+scalar subqueries. Four queries Postgres would have rejected at runtime are
+now compile errors instead.
+
+### Added
+
+- **Window functions.** `.over` attaches to any `SelectExpression`, so every
+  aggregate that existed before this release becomes a window function without
+  gaining an overload — `sum()` answers "of the group", `sum().over(…)`
+  answers "of the rows I am windowed with", from the same call site.
+
+      rank().over(.partition(by: sale.customerID).order(by: sale.total.desc()))
+      rank()       OVER (PARTITION BY customer_id ORDER BY total DESC)
+
+  `rank()`, `rowNumber()`, `denseRank()` are free functions returning a value
+  whose only method is `.over`, so the form Postgres rejects outside a window
+  cannot be written. `lag`/`lead` sit on `Column`, because unlike the ranking
+  functions they read their receiver, and return optionals — the first row of
+  a partition has nothing behind it.
+
+- **Frame clauses.** `rows(from:to:)` and `range(from:to:)`, which is the
+  difference between a running total and a trailing one; without a frame a
+  window is the whole partition, so a moving average was not expressible.
+  Start and end are separate types, so two of Postgres's three frame errors
+  cannot be spelled.
+
+- **Set operations.** `union`, `unionAll`, `intersect`, `except` between two
+  queries over the same entity. The combination is read as a derived table, so
+  the result is an ordinary query again: `where`, `order`, `limit`, `count`
+  and preloads all apply to the combined rows, and each branch keeps its own
+  `ORDER BY` and `LIMIT`.
+
+- **Correlated scalar subqueries.** `scalarCount()` and `scalar { … }` put
+  another query in this one's SELECT list — a per-row count without grouping
+  the outer query or spending a second round trip. Correlated like `exists()`:
+  the inner predicate may name the outer row's columns.
+
+- **`NULLS FIRST` / `NULLS LAST`** on any ordering. Postgres's default is not
+  neutral — NULLs sort last for `ASC` and first for `DESC` — so "newest first,
+  with the unfinished at the bottom" was previously unsayable.
+
+### Changed
+
+- **Serialization-failure retries now wait a jittered moment** (`0...10ms`,
+  doubling) instead of looping straight back in. Two transactions that
+  conflict are by definition concurrent, and retrying both instantly re-runs
+  the same overlap; a pair could spend every attempt aborting each other.
+  Worst case the default three attempts add under 30ms, and cancellation
+  propagates out of the wait rather than being swallowed.
+
+- **Four invalid queries are compile errors**, each naming the Postgres rule
+  it breaks and the fix:
+
+      Post.where { $0.viewCount.sum() > 5 }            // aggregate in WHERE
+      …groupBy { … }.having { …sum().over() > 5 }      // window in HAVING
+      Post.where { $0.viewCount.sum().over() > 5 }     // window in WHERE
+      repo.all(Post.groupBy { $0.authorID })           // grouped rows fetched whole
+
+  `CI/check-invalid-queries-fail.sh` compiles these on every push and fails if
+  any of them builds.
+
+### Source-breaking
+
+Narrow, and each breaks code that was producing invalid SQL:
+
+- `groupBy` returns `Query<Model, Grouped<Model>>` rather than
+  `Query<Model, Model>`. Code that names the type explicitly needs updating;
+  code that fetched a grouped query whole was generating SQL Postgres refuses.
+  `select(into:)`, `count`, `exists` and joins all still work.
+- Comparisons against an aggregate return `AggregatePredicate` rather than
+  `Predicate`, which is what keeps them out of `where`. `having` takes both.
+
+### Testing
+
+- Property-based tests over generated predicate trees and builder programs,
+  using PropertyBased — placeholder numbering, no value ever reaching the SQL
+  text, clause composition, and last-call-wins.
+- A differential suite: a generated predicate run against Postgres and against
+  an evaluator here, row sets compared. The evaluator models three-valued
+  logic, because that is where a disagreement would otherwise be ours.
+- hangar-vapor is built against every commit here. Its own CI had not run
+  since 2026-08-31, across three hangar releases.
+
 ## [0.6.0] - 2026-09-17
 
 Transactional test isolation, as a shipped product. Additive: nothing in the
