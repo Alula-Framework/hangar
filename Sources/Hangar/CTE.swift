@@ -59,7 +59,7 @@ extension Query {
     ///
     /// - Note: `WITH` attaches to reads. ``Repo/delete(_:)-(Query<M,R>)``
     ///   and ``Repo/update(_:set:)`` render it too, but a query that also
-    ///   ``reading(from:)`` a CTE is refused there rather than silently
+    ///   ``reading(from:)-(String)`` a CTE is refused there rather than silently
     ///   deleting from the wrong table.
     public func with(_ name: String, as body: SQLFragment) -> Query {
         var next = self
@@ -114,7 +114,7 @@ extension Query {
     /// ```
     ///
     /// The anchor's select list is the entity's full column list, so the
-    /// CTE exposes exactly the columns ``reading(from:)`` expects. The
+    /// CTE exposes exactly the columns ``reading(from:)-(String)`` expects. The
     /// recursive step must produce the same columns in the same order —
     /// Postgres rejects the statement if it does not.
     ///

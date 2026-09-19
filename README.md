@@ -574,40 +574,32 @@ not a build artifact.
 
 ## Common table expressions
 
-`with` names a subquery; `reading(from:)` makes it the query's source. The
-CTE renders `FROM "name" AS "entity_table"`, so every column reference,
-ordering, predicate and preload downstream resolves against it unchanged:
+A CTE is a value. Build it where it makes sense, pass it where it is needed:
 
 ```swift
-let busy = Post.all
-    .with("busy", as: Post.where { $0.viewCount > 50 })
-    .reading(from: "busy")
-    .order { $0.title.asc() }
+let popular = CommonTable<Post>("popular")
+    .where { $0.viewCount > 1_000 }
+    .order { $0.viewCount.desc() }
+    .limit(50)
 
-try await repo.all(busy)        // [Post]
+try await repo.all(
+    Post.all
+        .with(popular)
+        .where { $0.authorID.in(popular.select { $0.authorID }) })
 ```
 
-A recursive CTE takes a typed anchor and a raw step — the step is the half
-that refers to the CTE being defined, which no entity's columns can
-describe:
+The name is written once and travels with the body, so a declaration and a
+reference cannot disagree — the older spelling took it twice, in
+`with("popular", as:)` and again in `reading(from: "popular")`, and a
+misspelling was a runtime error about a relation that does not exist.
+`popular.all` reads it back as whole `Post` rows; `popular.select { … }` takes
+one column out of it for a membership test. Declaring the same CTE twice
+declares it once, because a `WITH` list that names it twice is an error rather
+than a query.
 
-```swift
-let subtree = Node.all
-    .withRecursive(
-        "subtree",
-        anchor: Node.where { $0.id == rootID },
-        recursive: """
-            SELECT "hangar_nodes".* FROM "hangar_nodes" \
-            JOIN "subtree" ON "hangar_nodes"."parent_id" = "subtree"."id"
-            """)
-    .reading(from: "subtree")
-```
-
-Interpolations in a raw body are binds, not text, exactly as in a fragment
-predicate. `count` and `exists` carry the CTE. A bulk `delete` or `update`
-may be *fed* by one — `WITH doomed AS (...) DELETE ... WHERE id IN (SELECT
-...)` — but cannot target one: `reading(from:)` on a bulk write throws
-rather than quietly writing to the entity's real table.
+A CTE body is a whole-row query by construction. That is the guarantee that
+makes reading it back as the entity safe: a projection would not expose the
+entity's columns, so narrowing belongs on the reference side, not the body.
 
 ## What is not here
 
