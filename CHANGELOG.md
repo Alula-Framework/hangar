@@ -4,6 +4,33 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-09-19
+
+### Fixed
+
+- **Two declarations of the same CTE no longer trap.** 0.9.0 compared
+  `CommonTable` values by object identity, so a factory returning
+  `CommonTable<Post>("popular")` twice — the obvious way to share one — hit a
+  precondition failure, even though both definitions were identical. It
+  compares what they render to now: the same definition under one name is one
+  declaration, and only genuinely different definitions conflict.
+
+### Testing
+
+- Five property tests written to break the library rather than to describe it.
+  Every property this project had asked whether a *select* was built as
+  intended; the two defects fixed in 0.8.1 were about what happened to a query
+  afterwards, which is why none of them noticed.
+
+  The new ones: Postgres parses everything the builder can produce (250
+  generated programs, each PREPAREd against the server); a bulk write is
+  refused or targets exactly what the query selects; no generated value reaches
+  the SQL text of any statement kind; every WITH list names each CTE once; and
+  rendering is deterministic.
+
+  Verified by reintroducing the 0.8.1 defect, which the bulk-write property
+  fails on and shrinks to a single step.
+
 ## [0.9.0] - 2026-09-19
 
 The rest of the 0.7.0/0.8.0 audit. One behaviour change worth reading before
