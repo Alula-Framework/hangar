@@ -23,6 +23,10 @@ public struct CommonTableExpression: Sendable {
     let name: String
     let isRecursive: Bool
     let body: Body
+    /// Rendered after the body's closing paren — `CYCLE … SET … USING …`.
+    /// Postgres puts it there, outside the parentheses, because it is a
+    /// property of the recursion rather than of the query inside it.
+    var trailingClause: String? = nil
 
     enum Body: Sendable {
         /// A raw body with binds — the general case.

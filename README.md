@@ -613,9 +613,24 @@ try await repo.all(
 The step receives the CTE being defined and joins it — `JOIN "tree"`, not the
 entity's table — which is the only way to write one, since it refers to itself.
 The step used to have to be raw SQL for exactly that reason: no entity
-describes a relation that does not exist yet. The step must reduce, or Postgres
-will recurse until the connection dies; a cycle in the data needs a guard the
-database can see.
+describes a relation that does not exist yet.
+
+**Over a graph rather than a tree, ask for cycle detection:**
+
+```swift
+let tree = CommonTable<Node>("tree").detectingCycles(on: { $0.id })
+```
+
+Without it Postgres walks a cycle until the connection dies. With it,
+recursion stops at the row that closes the cycle, and that row — a duplicate
+of one already returned — is dropped when you read the CTE back; pass
+`includingCycleClosers: true` to `reading(from:)` to see it. Requires Postgres
+14 or later.
+
+Whether you need this is not something a signature can tell you: a cycle is a
+property of the data, not of the query, and the same walk is finite over a
+tree and endless over a graph. What the type can do is make asking for it one
+call.
 
 A CTE body is a whole-row query by construction. That is the guarantee that
 makes reading it back as the entity safe: a projection would not expose the

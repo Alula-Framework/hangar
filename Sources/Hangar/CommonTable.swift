@@ -33,11 +33,49 @@ public struct CommonTable<T: Table>: Sendable {
     public let name: String
     /// What it selects — always whole rows of `T`.
     var definition: Query<T, T>
+    /// The column `CYCLE` keys on, when cycle detection was asked for.
+    var cycleKey: String?
 
     /// An empty CTE over the whole table; narrow it with the builders below.
     public init(_ name: String) {
         self.name = name
         self.definition = T.all
+        self.cycleKey = nil
+    }
+
+    /// The column names `CYCLE` adds to this CTE.
+    ///
+    /// Prefixed, because they sit alongside the entity's own columns and a
+    /// collision would be a confusing error about a duplicate column rather
+    /// than about cycles. They are never selected: this package writes an
+    /// explicit column list for every read, never `*`, so the extra columns
+    /// are invisible to anything reading the CTE back as its entity.
+    static var cycleMarkColumn: String { "hangar_is_cycle" }
+    static var cyclePathColumn: String { "hangar_cycle_path" }
+
+    /// Stop recursion when a row repeats, keyed on this column.
+    ///
+    /// A cycle is a property of the *data*, not of the query — the same walk
+    /// is finite over a tree and endless over a graph — so no signature can
+    /// tell you whether you need this. What it can do is make asking for it
+    /// one call:
+    ///
+    /// ```swift
+    /// let tree = CommonTable<Node>("tree").detectingCycles(on: { $0.id })
+    /// ```
+    ///
+    /// Without it, Postgres walks a cycle until the connection dies. With it,
+    /// recursion stops at the row that closes the cycle, and that row is
+    /// excluded from ``all`` — it is a duplicate of one already returned. Use
+    /// ``includingCycleClosers`` to see it.
+    ///
+    /// Requires Postgres 14 or later, where `CYCLE` landed.
+    public func detectingCycles<Value>(
+        on build: (T.QueryColumns) -> Column<Value>
+    ) -> CommonTable {
+        var copy = self
+        copy.cycleKey = build(T.queryColumns).name
+        return copy
     }
 
     private func mapping(_ transform: (Query<T, T>) -> Query<T, T>) -> CommonTable {
@@ -83,7 +121,23 @@ public struct CommonTable<T: Table>: Sendable {
     // MARK: - Using it
 
     /// This CTE as a query — `FROM "<name>"`, reading back as `T`.
+    ///
+    /// With cycle detection on, the row that closed a cycle is excluded: it
+    /// repeats a row already in the result, and including it by default would
+    /// make a guarded walk return something a guarded walk should not.
     public var all: Query<T, T> {
+        let base = T.all.reading(from: name)
+        guard cycleKey != nil else { return base }
+        return base.where { _ in
+            SQLFragment(stringLiteral: #"NOT "\#(Self.cycleMarkColumn)""#)
+        }
+    }
+
+    /// Every row the CTE produced, including the one that closed a cycle.
+    ///
+    /// The closing row is marked rather than dropped by Postgres, and it is
+    /// the evidence that a cycle was there at all.
+    public var includingCycleClosers: Query<T, T> {
         T.all.reading(from: name)
     }
 
@@ -104,8 +158,17 @@ extension Query where Result == Model {
     ///
     /// The typed counterpart of ``Query/reading(from:)-(String)``: the name comes
     /// from the value, so it cannot disagree with the declaration.
-    public func reading(from table: CommonTable<Model>) -> Query {
-        reading(from: table.name)
+    public func reading(
+        from table: CommonTable<Model>, includingCycleClosers: Bool = false
+    ) -> Query {
+        let base = reading(from: table.name)
+        guard table.cycleKey != nil, !includingCycleClosers else { return base }
+        // The row that closed the cycle repeats one already returned, so it is
+        // dropped unless asked for. Pass `includingCycleClosers: true` to see
+        // it — it is the evidence a cycle was there at all.
+        return base.where { _ in
+            SQLFragment(stringLiteral: #"NOT "\#(CommonTable<Model>.cycleMarkColumn)""#)
+        }
     }
 }
 
@@ -204,6 +267,10 @@ extension Query {
     ) -> Query {
         let stepQuery = build(table)
         var next = self
+        let cycleClause = table.cycleKey.map { key in
+            "CYCLE \(SQLRenderer.quote(key)) SET \(SQLRenderer.quote(CommonTable<T>.cycleMarkColumn)) "
+                + "USING \(SQLRenderer.quote(CommonTable<T>.cyclePathColumn))"
+        }
         next.ctes.append(
             CommonTableExpression(
                 name: table.name, isRecursive: true,
@@ -225,7 +292,8 @@ extension Query {
                             stepQuery, writer: &writer,
                             overrideList: T.schema.qualifiedSelectList)) ?? ""
                     return "\(head) UNION ALL \(tail)"
-                }))
+                },
+                trailingClause: cycleClause))
         return next
     }
 }

@@ -527,7 +527,8 @@ enum SQLRenderer {
             case .query(let render):
                 text = render(&writer)
             }
-            return "\(quote(cte.name)) AS (\(text))"
+            let suffix = cte.trailingClause.map { " \($0)" } ?? ""
+            return "\(quote(cte.name)) AS (\(text))\(suffix)"
         }
         return "WITH \(recursive)\(bodies.joined(separator: ", ")) "
     }
