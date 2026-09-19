@@ -573,6 +573,32 @@ enum SQLRenderer {
         case .function(let name, let arguments):
             let rendered = arguments.map { render($0, writer: &writer) }.joined(separator: ", ")
             return "\(name)(\(rendered))"
+        case .window(let operand, let specification):
+            // Binds inside the operand are written before the window's own,
+            // which is the order the text carries them — PARTITION BY and
+            // ORDER BY take columns, not values, so in practice the window
+            // contributes none. Rendering through the same writer keeps that
+            // true if it ever stops being.
+            let function = render(operand, writer: &writer)
+            var clauses: [String] = []
+            if !specification.partitions.isEmpty {
+                let columns = specification.partitions
+                    .map { render($0, writer: &writer) }
+                    .joined(separator: ", ")
+                clauses.append("PARTITION BY \(columns)")
+            }
+            if !specification.orderings.isEmpty {
+                let terms = specification.orderings
+                    .map { term -> String in
+                        let column =
+                            writer.qualified && !term.table.isEmpty
+                            ? "\(quote(term.table)).\(quote(term.column))" : quote(term.column)
+                        return "\(column) \(term.clause)"
+                    }
+                    .joined(separator: ", ")
+                clauses.append("ORDER BY \(terms)")
+            }
+            return "\(function) OVER (\(clauses.joined(separator: " ")))"
         case .cast(let operand, let type):
             return "(\(render(operand, writer: &writer)))::\(type)"
         case .inSubquery(let lhs, let subquery):

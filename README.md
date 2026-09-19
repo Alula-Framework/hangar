@@ -93,6 +93,32 @@ try await repo.all(
 )
 ```
 
+**Window functions** — a value computed from the rows *around* this one.
+Every aggregate gains `.over`, so the same call site answers two questions:
+
+```swift
+struct Ranked: Decodable {
+    let title: String
+    let position: Int
+    let authorTotal: Int?
+}
+
+try await repo.all(
+    Post.select(into: Ranked.self) { p in
+        (title: p.title,
+         position: WindowFunctions.rowNumber().over {
+             $0.partition(by: p.authorID).order(p.viewCount.desc())
+         },
+         authorTotal: p.viewCount.sum().over { $0.partition(by: p.authorID) })
+    })
+```
+
+`rowNumber()`, `rank()`, `denseRank()`, and `lag`/`lead` on any column. Those
+have no meaning outside a window, so they return a value whose only method is
+`.over` — the invalid form is unspellable rather than a runtime error. An empty
+`.over()` is the whole result set, which is how `count().over()` puts the total
+beside each row. Frame clauses (`ROWS BETWEEN`) are not here yet.
+
 **Joins**, inner and left, with the base entity's columns qualified —
 including self-joins through table aliases:
 

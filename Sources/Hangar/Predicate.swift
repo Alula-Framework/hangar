@@ -1,5 +1,14 @@
 /// The expression tree behind predicates. Values are always `SQLBind`
 /// parameters — a value can never become SQL text.
+/// What a window function sees: which rows it groups with, and in what order.
+///
+/// Empty means `OVER ()` — every row of the result set, unordered, which is
+/// how `count(*) OVER ()` becomes "how many rows matched" alongside each row.
+struct WindowSpecification: Sendable {
+    var partitions: [SQLExpression] = []
+    var orderings: [OrderTerm] = []
+}
+
 indirect enum SQLExpression: Sendable {
     /// A column reference. `table` renders only in multi-table scopes
     /// (correlated subqueries, joins) — the writer decides.
@@ -12,6 +21,13 @@ indirect enum SQLExpression: Sendable {
     case anyOf(SQLExpression, SQLExpression)
     /// `name(args...)` — aggregates and, later, arbitrary functions.
     case function(String, [SQLExpression])
+    /// `expr OVER (PARTITION BY … ORDER BY …)`.
+    ///
+    /// A window is a property of *how a function reads the result set*, not of
+    /// the function itself, which is why it wraps an expression rather than
+    /// being a kind of function: `sum(x)` and `sum(x) OVER (…)` are the same
+    /// call site answering two different questions.
+    case window(SQLExpression, WindowSpecification)
     /// `(operand)::type` — dialect-accommodation casts (integer sum →
     /// bigint, avg → float8). The type string is always Hangar-authored,
     /// never user input.
