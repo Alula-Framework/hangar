@@ -22,7 +22,7 @@ struct WindowRenderingTests {
     @Test("an aggregate gains OVER without changing its call site")
     func aggregateOverPartition() {
         let query = Post.select(into: Row.self) { post in
-            (title: post.title, rank: post.viewCount.sum().over { $0.partition(by: post.authorID) })
+            (title: post.title, rank: post.viewCount.sum().over(.partition(by: post.authorID)))
         }
         let sql = SQLRenderer.select(query).sql
         #expect(sql.contains(#"(sum("view_count") OVER (PARTITION BY "author_id"))::bigint"#))
@@ -41,9 +41,8 @@ struct WindowRenderingTests {
         let query = Post.select(into: Row.self) { post in
             (
                 title: post.title,
-                rank: WindowFunctions.rowNumber().over {
-                    $0.partition(by: post.authorID).order(post.viewCount.desc())
-                }
+                rank: rowNumber().over(
+                    .partition(by: post.authorID).order(by: post.viewCount.desc()))
             )
         }
         let sql = SQLRenderer.select(query).sql
@@ -57,7 +56,7 @@ struct WindowRenderingTests {
         let query = Post.select(into: Row.self) { post in
             (
                 title: post.title,
-                rank: WindowFunctions.rank().over { $0.order(post.nickname.asc().nullsLast()) }
+                rank: rank().over(.order(by: post.nickname.asc().nullsLast()))
             )
         }
         #expect(
@@ -68,16 +67,15 @@ struct WindowRenderingTests {
     @Test("a frame renders after the ordering, and only when asked")
     func frameRenders() {
         let unframed = Post.select(into: Row.self) { post in
-            (title: post.title, rank: post.viewCount.sum().over { $0.order(post.createdAt.asc()) })
+            (title: post.title, rank: post.viewCount.sum().over(.order(by: post.createdAt.asc())))
         }
         #expect(!SQLRenderer.select(unframed).sql.contains("ROWS BETWEEN"))
 
         let trailing = Post.select(into: Row.self) { post in
             (
                 title: post.title,
-                rank: post.viewCount.sum().over {
-                    $0.order(post.createdAt.asc()).rows(from: .preceding(2))
-                }
+                rank: post.viewCount.sum().over(
+                    .order(by: post.createdAt.asc()).rows(from: .preceding(2)))
             )
         }
         #expect(
@@ -87,10 +85,9 @@ struct WindowRenderingTests {
         let whole = Post.select(into: Row.self) { post in
             (
                 title: post.title,
-                rank: post.viewCount.sum().over {
-                    $0.order(post.createdAt.asc())
-                        .rows(from: .unboundedPreceding, to: .unboundedFollowing)
-                }
+                rank: post.viewCount.sum().over(
+                    .order(by: post.createdAt.asc())
+                        .rows(from: .unboundedPreceding, to: .unboundedFollowing))
             )
         }
         #expect(
@@ -100,9 +97,8 @@ struct WindowRenderingTests {
         let peers = Post.select(into: Row.self) { post in
             (
                 title: post.title,
-                rank: post.viewCount.sum().over {
-                    $0.order(post.viewCount.asc()).range(from: .unboundedPreceding)
-                }
+                rank: post.viewCount.sum().over(
+                    .order(by: post.viewCount.asc()).range(from: .unboundedPreceding))
             )
         }
         #expect(
@@ -115,7 +111,7 @@ struct WindowRenderingTests {
         let query = Post.select(into: Lagged.self) { post in
             (
                 title: post.title,
-                previous: post.viewCount.lag(2).over { $0.order(post.createdAt.asc()) }
+                previous: post.viewCount.lag(2).over(.order(by: post.createdAt.asc()))
             )
         }
         let statement = SQLRenderer.select(query)

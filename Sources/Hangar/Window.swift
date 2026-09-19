@@ -4,7 +4,7 @@
 // SELECT-list item this package produces. Attaching `.over(_:)` there means
 // every aggregate that existed before this file becomes a window function
 // without gaining an overload: `sum()` answers "of the group", and
-// `sum().over { … }` answers "of the rows I am windowed with", from the same
+// `sum().over(…)` answers "of the rows I am windowed with", from the same
 // call site.
 //
 // **A window function belongs in the SELECT list.** Postgres rejects one in
@@ -99,6 +99,20 @@ public struct Window: Sendable {
 
     public init() {}
 
+    /// Start a window with a partition: `.partition(by: sale.customerID)`.
+    ///
+    /// The static form is what lets a window be written as a leading-dot
+    /// chain at the call site, which is the whole point — `OVER (PARTITION BY
+    /// customer_id ORDER BY total DESC)` should be readable as itself.
+    public static func partition<Value>(by column: Column<Value>) -> Window {
+        Window().partition(by: column)
+    }
+
+    /// Start a window with an ordering: `.order(by: sale.total.desc())`.
+    public static func order(by term: OrderTerm) -> Window {
+        Window().order(by: term)
+    }
+
     /// Restart the function for each distinct value of this column.
     ///
     /// `PARTITION BY author_id` makes `row_number()` count 1, 2, 3 within each
@@ -115,7 +129,7 @@ public struct Window: Sendable {
     /// along. It is independent of the query's own `ORDER BY`, which decides
     /// the order rows come back in — the same term usually belongs in both,
     /// and forgetting that is why a ranking can look shuffled.
-    public func order(_ term: OrderTerm) -> Window {
+    public func order(by term: OrderTerm) -> Window {
         var copy = self
         copy.specification.orderings.append(term)
         return copy
@@ -129,9 +143,7 @@ public struct Window: Sendable {
     ///
     /// ```swift
     /// // The average of this row and the two before it.
-    /// p.viewCount.avg().over {
-    ///     $0.order(p.createdAt.asc()).rows(from: .preceding(2))
-    /// }
+    /// p.viewCount.avg().over(.order(by: p.createdAt.asc()).rows(from: .preceding(2)))
     /// ```
     ///
     /// The end defaults to the current row, which is what "so far" means in
@@ -168,13 +180,13 @@ extension SelectExpression {
     /// ```swift
     /// Post.select(into: Ranked.self) { p in
     ///     (p.title, p.viewCount,
-    ///      p.viewCount.sum().over { $0.partition(by: p.authorID) })
+    ///      p.viewCount.sum().over(.partition(by: p.authorID)))
     /// }
     /// ```
     ///
     /// With no builder it is `OVER ()`: the whole result set.
-    public func over(_ build: (Window) -> Window = { $0 }) -> WindowExpression<Value> {
-        let specification = build(Window()).specification
+    public func over(_ window: Window = Window()) -> WindowExpression<Value> {
+        let specification = window.specification
         // The window binds tighter than a cast: `sum(x)` renders as
         // `(sum(x))::bigint` so integer sums decode, and the window belongs
         // *inside* that — `(sum(x) OVER (…))::bigint`. Wrapping the cast
@@ -205,30 +217,39 @@ public struct WindowOnlyFunction<Value>: Sendable {
 
     /// Fix this function to a window. Required — it is the only thing you can
     /// do with this value.
-    public func over(_ build: (Window) -> Window = { $0 }) -> WindowExpression<Value> {
-        let windowed = SQLExpression.window(function, build(Window()).specification)
+    public func over(_ window: Window = Window()) -> WindowExpression<Value> {
+        let windowed = SQLExpression.window(function, window.specification)
         guard let castTo else { return WindowExpression<Value>(expression: windowed) }
         return WindowExpression<Value>(expression: .cast(windowed, castTo))
     }
 }
 
-/// The ranking functions, which exist only inside a window.
-public enum WindowFunctions {
-    /// `row_number()` — 1, 2, 3 … within the partition, never tied.
-    public static func rowNumber() -> WindowOnlyFunction<Int> {
-        WindowOnlyFunction(function: .function("row_number", []), castTo: "int")
-    }
+// MARK: - The ranking functions
+//
+// Free functions, so a call site reads as the SQL it becomes:
+//
+//     rank().over(.partition(by: sale.customerID).order(by: sale.total.desc()))
+//     rank()       OVER (PARTITION BY customer_id ORDER BY total DESC)
+//
+// They were static members of an enum first. That put a name of this
+// package's invention in front of every window — `WindowFunctions.rank()` —
+// for no reason except to avoid three module-scope functions, which Swift
+// already namespaces by module and which a caller's own `rank` shadows.
 
-    /// `rank()` — ties share a number and the next value skips (1, 1, 3).
-    public static func rank() -> WindowOnlyFunction<Int> {
-        WindowOnlyFunction(function: .function("rank", []), castTo: "int")
-    }
+/// `row_number()` — 1, 2, 3 … within the partition, never tied.
+public func rowNumber() -> WindowOnlyFunction<Int> {
+    WindowOnlyFunction(function: .function("row_number", []), castTo: "int")
+}
 
-    /// `dense_rank()` — ties share a number and the next value does not skip
-    /// (1, 1, 2).
-    public static func denseRank() -> WindowOnlyFunction<Int> {
-        WindowOnlyFunction(function: .function("dense_rank", []), castTo: "int")
-    }
+/// `rank()` — ties share a number and the next value skips (1, 1, 3).
+public func rank() -> WindowOnlyFunction<Int> {
+    WindowOnlyFunction(function: .function("rank", []), castTo: "int")
+}
+
+/// `dense_rank()` — ties share a number and the next value does not skip
+/// (1, 1, 2).
+public func denseRank() -> WindowOnlyFunction<Int> {
+    WindowOnlyFunction(function: .function("dense_rank", []), castTo: "int")
 }
 
 extension Column {

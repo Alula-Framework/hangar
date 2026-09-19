@@ -53,9 +53,9 @@ extension PostgresIntegrationSuite {
                     Post.select(into: Ranked.self) { post in
                         (
                             title: post.title,
-                            position: WindowFunctions.rowNumber().over {
-                                $0.partition(by: post.authorID).order(post.viewCount.desc())
-                            }
+                            position: rowNumber().over(
+                                .partition(by: post.authorID)
+                                    .order(by: post.viewCount.desc()))
                         )
                     }
                     .order { $0.title.asc() })
@@ -84,9 +84,8 @@ extension PostgresIntegrationSuite {
                     .select(into: Running.self) { post in
                         (
                             title: post.title,
-                            total: post.viewCount.sum().over {
-                                $0.order(post.viewCount.asc())
-                            }
+                            total: post.viewCount.sum().over(
+                                .order(by: post.viewCount.asc()))
                         )
                     }
                     // Returned newest-first; the running total must still
@@ -110,9 +109,9 @@ extension PostgresIntegrationSuite {
                     Post.select(into: Neighbour.self) { post in
                         (
                             title: post.title,
-                            previous: post.viewCount.lag().over {
-                                $0.partition(by: post.authorID).order(post.viewCount.asc())
-                            }
+                            previous: post.viewCount.lag().over(
+                                .partition(by: post.authorID)
+                                    .order(by: post.viewCount.asc()))
                         )
                     }
                     .order { $0.title.asc() })
@@ -145,9 +144,8 @@ extension PostgresIntegrationSuite {
                         (
                             title: post.title,
                             // This row and the one before it, in view order.
-                            trailing: post.viewCount.sum().over {
-                                $0.order(post.viewCount.asc()).rows(from: .preceding(1))
-                            }
+                            trailing: post.viewCount.sum().over(
+                                .order(by: post.viewCount.asc()).rows(from: .preceding(1)))
                         )
                     }
                     .order { $0.viewCount.asc() })

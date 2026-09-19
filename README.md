@@ -142,12 +142,15 @@ struct Ranked: Decodable {
 try await repo.all(
     Post.select(into: Ranked.self) { p in
         (title: p.title,
-         position: WindowFunctions.rowNumber().over {
-             $0.partition(by: p.authorID).order(p.viewCount.desc())
-         },
-         authorTotal: p.viewCount.sum().over { $0.partition(by: p.authorID) })
+         position: rowNumber().over(
+             .partition(by: p.authorID).order(by: p.viewCount.desc())),
+         authorTotal: p.viewCount.sum().over(.partition(by: p.authorID)))
     })
 ```
+
+The call site is meant to read as the SQL it becomes —
+`rank().over(.partition(by:).order(by:))` against
+`rank() OVER (PARTITION BY … ORDER BY …)`.
 
 `rowNumber()`, `rank()`, `denseRank()`, and `lag`/`lead` on any column. Those
 have no meaning outside a window, so they return a value whose only method is
@@ -160,7 +163,7 @@ trailing average needs — without one the window is the whole partition:
 
 ```swift
 // This row and the two before it, in date order.
-p.viewCount.avg().over { $0.order(p.createdAt.asc()).rows(from: .preceding(2)) }
+p.viewCount.avg().over(.order(by: p.createdAt.asc()).rows(from: .preceding(2)))
 ```
 
 `rows` counts physical rows and `range` counts peers (rows the ordering cannot
