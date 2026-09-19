@@ -630,6 +630,8 @@ enum SQLRenderer {
             return "(\(render(operand, writer: &writer)))::\(type)"
         case .inSubquery(let lhs, let subquery):
             return "(\(render(lhs, writer: &writer)) IN (\(subquery.render(&writer))))"
+        case .scalarSubquery(let subquery):
+            return "(\(subquery.render(&writer)))"
         case .existsSubquery(let subquery):
             return "EXISTS (\(subquery.render(&writer)))"
         case .fragment(let parts):

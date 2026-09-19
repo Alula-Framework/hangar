@@ -43,6 +43,9 @@ indirect enum SQLExpression: Sendable {
     /// rendered with qualified column references throughout, since inner
     /// and outer tables coexist in one scope.
     case existsSubquery(SubquerySQL)
+    /// `(SELECT one-expression FROM ... WHERE ...)` in a SELECT list — a
+    /// correlated scalar subquery. One row, one column, or NULL.
+    case scalarSubquery(SubquerySQL)
     /// A safe raw fragment: literal SQL text interleaved
     /// with bound values — see `SQLFragment`.
     case fragment([SQLFragment.Part])

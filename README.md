@@ -93,6 +93,21 @@ try await repo.all(
 )
 ```
 
+**Correlated scalar subqueries** — another query as one column of this one:
+
+```swift
+Post.select(into: PostWithCount.self) { post in
+    (title: post.title,
+     comments: Comment.where { $0.postID == post.id }.scalarCount(),
+     author: Author.where { $0.id == post.authorID }.scalar { $0.name })
+}
+```
+
+The inner `where` may reference the outer row, like `exists()`. `scalarCount()`
+is non-optional (`count(*)` over no rows is 0); `scalar` is optional and takes
+`LIMIT 1`, because a subquery matching no row is NULL and one matching two is a
+runtime error.
+
 **Set operations** — `union`, `unionAll`, `intersect`, `except` between two
 queries over the same entity:
 
