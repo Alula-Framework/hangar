@@ -46,6 +46,13 @@ let package = Package(
         // swift-syntax bumps its major with each Swift release; the open
         // range is the community convention for macro packages.
         .package(url: "https://github.com/swiftlang/swift-syntax.git", "601.0.0"..<"999.0.0"),
+        // Test-only: property-based testing with shrinking, for the renderer
+        // invariants that hold across every predicate shape rather than the
+        // handful anyone writes by hand. Pinned to the minor for the same
+        // reason swift-changeset is — no committed Package.resolved.
+        .package(
+            url: "https://github.com/x-sheep/swift-property-based.git",
+            .upToNextMinor(from: "2.0.0")),
     ],
     targets: [
         .target(
@@ -98,6 +105,7 @@ let package = Package(
                 "HangarTesting",
                 "Hangar",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "PropertyBased", package: "swift-property-based"),
             ]
         ),
         // Benchmarks live in an executable, not the test suite: they need a
