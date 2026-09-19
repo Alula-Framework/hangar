@@ -93,6 +93,27 @@ try await repo.all(
 )
 ```
 
+**Set operations** — `union`, `unionAll`, `intersect`, `except` between two
+queries over the same entity:
+
+```swift
+let urgent = Post.where { $0.viewCount > 10_000 }
+let recent = Post.where { $0.createdAt > cutoff }
+
+try await repo.all(
+    urgent.union(recent)
+        .where { $0.published }       // filters the combined set
+        .order { $0.createdAt.desc() }
+        .limit(20))
+```
+
+The combination is read as a derived table, so the result is an ordinary query
+again: everything downstream — `where`, `order`, `limit`, `count`, preloads —
+applies to the combined rows. Each branch keeps its own `ORDER BY` and `LIMIT`,
+so "the twenty most viewed, plus the five newest" is two bounded branches.
+Whole rows only: both sides select one entity's columns, which is what
+guarantees the shapes match.
+
 **Window functions** — a value computed from the rows *around* this one.
 Every aggregate gains `.over`, so the same call site answers two questions:
 

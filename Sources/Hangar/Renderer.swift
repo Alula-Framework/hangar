@@ -1,5 +1,5 @@
-import Foundation
 import Changesets
+import Foundation
 import PostgresNIO
 
 /// A rendered statement: SQL with `$n` placeholders plus the binds that fill
@@ -76,7 +76,8 @@ enum SQLRenderer {
         } else {
             list = M.schema.selectList
         }
-        var sql = "\(prefix)SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list) FROM \(source(M.self, cte: query.fromCTE))"
+        var sql =
+            "\(prefix)SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list) FROM \(source(M.self, query: query, writer: &writer))"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         if !query.grouping.isEmpty {
             let terms = query.grouping
@@ -122,7 +123,7 @@ enum SQLRenderer {
                 binds: writer.binds)
         }
         let prefix = withClause(query.ctes, writer: &writer)
-        var sql = "\(prefix)SELECT count(*) FROM \(source(M.self, cte: query.fromCTE))"
+        var sql = "\(prefix)SELECT count(*) FROM \(source(M.self, query: query, writer: &writer))"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         return RenderedStatement(sql: sql, binds: writer.binds)
     }
@@ -141,7 +142,7 @@ enum SQLRenderer {
             return RenderedStatement(sql: "SELECT EXISTS (\(inner))", binds: writer.binds)
         }
         let prefix = withClause(query.ctes, writer: &writer)
-        var inner = "SELECT 1 FROM \(source(M.self, cte: query.fromCTE))"
+        var inner = "SELECT 1 FROM \(source(M.self, query: query, writer: &writer))"
         appendWhere(query.effectivePredicate, to: &inner, writer: &writer)
         return RenderedStatement(sql: "\(prefix)SELECT EXISTS (\(inner))", binds: writer.binds)
     }
@@ -214,7 +215,8 @@ enum SQLRenderer {
         let schema = M.schema
         let columns = schema.insertable
         var writer = BindWriter()
-        let placeholders = try columns
+        let placeholders =
+            try columns
             .map { writer.placeholder(try bind(model, $0.name, in: schema)) }
             .joined(separator: ", ")
         let sql = """
@@ -230,9 +232,11 @@ enum SQLRenderer {
         let schema = M.schema
         let columns = schema.insertable
         var writer = BindWriter()
-        let rows = try models
+        let rows =
+            try models
             .map { model in
-                let placeholders = try columns
+                let placeholders =
+                    try columns
                     .map { writer.placeholder(try bind(model, $0.name, in: schema)) }
                     .joined(separator: ", ")
                 return "(\(placeholders))"
@@ -252,8 +256,11 @@ enum SQLRenderer {
             throw HangarError.noUpdatableColumns(table: schema.name)
         }
         var writer = BindWriter()
-        let assignments = try sets
-            .map { "\($0.quotedName) = \(writer.placeholder(try bind(model, $0.name, in: schema)))" }
+        let assignments =
+            try sets
+            .map {
+                "\($0.quotedName) = \(writer.placeholder(try bind(model, $0.name, in: schema)))"
+            }
             .joined(separator: ", ")
         let sql = """
             UPDATE \(schema.quotedName) SET \(assignments) \
@@ -280,14 +287,18 @@ enum SQLRenderer {
         guard !columns.isEmpty else {
             // Nothing changed: every column falls to its database default.
             return RenderedStatement(
-                sql: "INSERT INTO \(schema.quotedName) DEFAULT VALUES\(conflict) RETURNING \(schema.selectList)",
+                sql:
+                    "INSERT INTO \(schema.quotedName) DEFAULT VALUES\(conflict) RETURNING \(schema.selectList)",
                 binds: [])
         }
         var writer = BindWriter()
-        let placeholders = try columns
+        let placeholders =
+            try columns
             .map {
                 writer.placeholder(
-                    try changesetBind(type, column: $0.name, value: validated.changedFields[$0.name]!, in: schema))
+                    try changesetBind(
+                        type, column: $0.name, value: validated.changedFields[$0.name]!, in: schema)
+                )
             }
             .joined(separator: ", ")
         let sql = """
@@ -313,7 +324,8 @@ enum SQLRenderer {
             throw HangarError.noUpdatableColumns(table: schema.name)
         }
         var writer = BindWriter()
-        let assignments = try sets
+        let assignments =
+            try sets
             .map {
                 "\($0.quotedName) = \(writer.placeholder(try changesetBind(type, column: $0.name, value: validated.changedFields[$0.name]!, in: schema)))"
             }
@@ -436,7 +448,8 @@ enum SQLRenderer {
         var writer = BindWriter()
         // WITH first, so its binds are numbered in text order.
         let prefix = withClause(query.ctes, writer: &writer)
-        let sets = assignments
+        let sets =
+            assignments
             .map { "\(quote($0.name)) = \(render($0.expression, writer: &writer))" }
             .joined(separator: ", ")
         var sql = "\(prefix)UPDATE \(M.schema.quotedName) SET \(sets)"
@@ -527,6 +540,18 @@ enum SQLRenderer {
         return "\(quote(cte)) AS \(M.schema.quotedName)"
     }
 
+    /// `FROM (…) AS "posts"` for a query reading a derived table.
+    ///
+    /// Aliased as the entity's own table so every column reference downstream
+    /// — predicates, ordering, preloads — qualifies exactly as it would
+    /// against the table itself. Postgres requires the alias regardless.
+    static func source<M: Table>(
+        _ type: M.Type, query: Query<M, some Sendable>, writer: inout BindWriter
+    ) -> String {
+        guard let derived = query.fromDerived else { return source(M.self, cte: query.fromCTE) }
+        return "(\(derived(&writer))) AS \(M.schema.quotedName)"
+    }
+
     /// Fragment parts as SQL, appending binds — the unparenthesized form,
     /// for a CTE body or any other whole-statement position. The predicate
     /// path in ``render(_:writer:)`` parenthesizes instead, because a
@@ -550,7 +575,8 @@ enum SQLRenderer {
         return text
     }
 
-    static func appendWhere(_ predicate: Predicate?, to sql: inout String, writer: inout BindWriter) {
+    static func appendWhere(_ predicate: Predicate?, to sql: inout String, writer: inout BindWriter)
+    {
         guard let predicate else { return }
         sql += " WHERE \(render(predicate.expression, writer: &writer))"
     }
@@ -625,11 +651,15 @@ enum SQLRenderer {
         _ model: M, schema: TableSchema, writer: inout BindWriter
     ) throws -> String {
         try schema.primaryKey
-            .map { "\($0.quotedName) = \(writer.placeholder(try bind(model, $0.name, in: schema)))" }
+            .map {
+                "\($0.quotedName) = \(writer.placeholder(try bind(model, $0.name, in: schema)))"
+            }
             .joined(separator: " AND ")
     }
 
-    private static func bind<M: Table>(_ model: M, _ column: String, in schema: TableSchema) throws -> SQLBind {
+    private static func bind<M: Table>(_ model: M, _ column: String, in schema: TableSchema) throws
+        -> SQLBind
+    {
         guard let bind = model._bind(for: column) else {
             throw HangarError.unknownColumn(table: schema.name, column: column)
         }

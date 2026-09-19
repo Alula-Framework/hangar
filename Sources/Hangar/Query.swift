@@ -11,6 +11,10 @@ public struct Query<Model: Table, Result: Sendable>: Sendable {
     /// the parent rows decode. Carried on the query, applied only when the
     /// query produces full models.
     var preloads: [PreloadStep<Model>] = []
+    /// A derived table to read from instead of the entity's own: `FROM (…) AS
+    /// "posts"`. Set by the set operations, which have no name to give the
+    /// combination and no need for one — see `SetOperation.swift`.
+    var fromDerived: (@Sendable (inout BindWriter) -> String)?
     /// GROUP BY expressions and the HAVING predicate.
     var grouping: [SQLExpression] = []
     var having: Predicate?
