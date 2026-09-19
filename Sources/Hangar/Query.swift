@@ -55,6 +55,7 @@ public struct Query<Model: Table, Result: Sendable>: Sendable {
         next.deletedRows = deletedRows
         next.ctes = ctes
         next.fromCTE = fromCTE
+        next.fromDerived = fromDerived
         next.selection = selection
         return next
     }
@@ -267,6 +268,7 @@ extension Query {
         next.deletedRows = deletedRows
         next.ctes = ctes
         next.fromCTE = fromCTE
+        next.fromDerived = fromDerived
         return next
     }
 

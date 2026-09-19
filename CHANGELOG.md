@@ -4,6 +4,42 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-19
+
+Two data-correctness fixes in set operations. **Anyone on 0.7.0 or 0.8.0 using
+`union`/`intersect`/`except` should upgrade.** Found by an external audit, not
+by this project's own tests.
+
+### Fixed
+
+- **A bulk delete or update over a set operation targeted the whole table.**
+  A combination is carried on the query's derived source, and the bulk-write
+  validator did not reject it — so the derived source was dropped and
+
+      repo.delete(Post.where { $0.flagged }.union(Post.where { $0.expired }))
+
+  rendered `DELETE FROM "hangar_posts" RETURNING "id"`. No WHERE clause at
+  all: every row in the table, from a call that reads as "delete the union of
+  these two". It is refused now, named as a set operation, alongside the other
+  clauses a bulk write cannot express.
+
+- **Projecting or grouping a combination silently dropped it.** The retype
+  paths copied thirteen fields and not the derived source, so
+
+      combined.select { $0.title }
+
+  rendered `SELECT "title" FROM "hangar_posts"` — the whole table, no error,
+  because the result is still valid SQL over the entity. Both paths carry it
+  now.
+
+### Testing
+
+- A test that every field of a query survives a retype, by reflection rather
+  than by listing them. Both bugs above were one field missing from one
+  copier, and this project has made that mistake before (`deletedRows`), so
+  the check is structural rather than another enumeration to keep in sync.
+  Verified by reintroducing the bug and watching it name the field.
+
 ## [0.8.0] - 2026-09-19
 
 Common table expressions as values. Additive: nothing public was removed or

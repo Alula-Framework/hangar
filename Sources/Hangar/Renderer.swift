@@ -481,6 +481,14 @@ enum SQLRenderer {
         } else if let lock = query.rowLock {
             // DELETE and UPDATE already take their own row locks.
             unsupported = lock.rawValue
+        } else if query.fromDerived != nil {
+            // A set operation is a *source*, and DELETE/UPDATE target a table.
+            // Rendered anyway, the derived source is simply dropped and the
+            // statement becomes `DELETE FROM "posts"` with whatever predicate
+            // the outer query happens to carry — which, for a combination, is
+            // none. That is every row in the table, from a call that reads as
+            // "delete the union of these two".
+            unsupported = "set operation"
         } else if query.fromCTE != nil {
             // A CTE can *feed* a bulk write, but it cannot be its target:
             // `DELETE FROM "cte"` deletes nothing real. Attaching the CTE
