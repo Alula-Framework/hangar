@@ -41,6 +41,11 @@ struct DatabaseGateTests {
             │      "postgres://postgres:hangar@127.0.0.1:55433/hangar_test?sslmode=disable"
             │                                                                      │
             │    swift test                                                        │
+            │                                                                      │
+            │  And do not read the summary line as a count of what ran:            │
+            │  "Test run with N tests" counts the tests swift-testing DISCOVERED,  │
+            │  not the ones it executed. A database-less run prints the same N as  │
+            │  a full one while executing roughly half of them.                    │
             └──────────────────────────────────────────────────────────────────────┘
 
             """)

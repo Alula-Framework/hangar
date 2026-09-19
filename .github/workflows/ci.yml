@@ -55,14 +55,20 @@ jobs:
       # Fails rather than silently skipping if the database is unreachable.
       # A green run that skipped every integration test proves almost nothing,
       # and this suite's whole value is what it proves against real Postgres.
+      #
+      # This used to test whether the variable was empty — in a step that set
+      # it to a literal on the line above, so it could never fire. What can
+      # actually go wrong is the service: a container that never became
+      # healthy, or a hostname that does not resolve from inside this one. So
+      # open the socket. Bash's /dev/tcp needs no client installed, which
+      # matters because the Swift image ships no psql.
       - name: Verify the integration gate is armed
-        env:
-          HANGAR_TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/hangar_test
         run: |
-          if [ -z "$HANGAR_TEST_DATABASE_URL" ]; then
-            echo "::error::integration tests would skip — the database URL is unset"
+          if ! timeout 10 bash -c 'cat < /dev/null > /dev/tcp/postgres/5432' 2>/dev/null; then
+            echo "::error::postgres:5432 is unreachable — every integration suite would skip"
             exit 1
           fi
+          echo "postgres:5432 is reachable"
 
       - name: Test
         env:

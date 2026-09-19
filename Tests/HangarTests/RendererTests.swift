@@ -158,4 +158,19 @@ struct SchemaMetadataTests {
         let post = Post.sample(nickname: "zed")
         #expect(post.nickname == "zed")
     }
+
+    @Test("NULLS FIRST/LAST renders after the direction, and only when asked")
+    func nullsPlacement() {
+        // Absent by default: the server's own rule still applies, and the SQL
+        // says nothing about it.
+        #expect(
+            SQLRenderer.select(Post.order { $0.nickname.desc() }).sql
+                .hasSuffix(#"ORDER BY "nickname" DESC"#))
+        #expect(
+            SQLRenderer.select(Post.order { $0.nickname.desc().nullsLast() }).sql
+                .hasSuffix(#"ORDER BY "nickname" DESC NULLS LAST"#))
+        #expect(
+            SQLRenderer.select(Post.order { $0.nickname.asc().nullsFirst() }).sql
+                .hasSuffix(#"ORDER BY "nickname" ASC NULLS FIRST"#))
+    }
 }
