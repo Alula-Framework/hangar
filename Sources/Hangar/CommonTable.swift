@@ -126,3 +126,106 @@ extension Query {
         return next
     }
 }
+
+extension CommonTable {
+    /// This CTE's columns, qualified with its name — `"tree"."id"`.
+    ///
+    /// The same mechanism `Aliased` uses for self-joins: a `QueryColumns`
+    /// rebuilt under a different qualifier.
+    public var columns: T.QueryColumns { T.QueryColumns(table: name) }
+}
+
+extension Table {
+    /// Joins a CTE, which renders as the CTE's name rather than a table.
+    ///
+    /// This is the shape a recursive step needs — the real table joined to
+    /// the rows found so far:
+    ///
+    /// ```swift
+    /// Category.join(tree, on: { child, found in child.parentID == found.id })
+    /// // FROM "categories" JOIN "tree" ON ("categories"."parent_id" = "tree"."id")
+    /// ```
+    public static func join<B: Table>(
+        _ cte: CommonTable<B>,
+        on condition: (QueryColumns, B.QueryColumns) -> Predicate
+    ) -> JoinedQuery<Self, B, Self> {
+        var query = JoinedQuery<Self, B, Self>(
+            kind: .inner, onPredicate: condition(queryColumns, cte.columns))
+        query.columnsA = queryColumns
+        query.columnsB = cte.columns
+        query.joinedSource = cte.name
+        return query
+    }
+
+    /// `LEFT JOIN` against a CTE.
+    public static func leftJoin<B: Table>(
+        _ cte: CommonTable<B>,
+        on condition: (QueryColumns, B.QueryColumns) -> Predicate
+    ) -> JoinedQuery<Self, B, Self> {
+        var query = JoinedQuery<Self, B, Self>(
+            kind: .left, onPredicate: condition(queryColumns, cte.columns))
+        query.columnsA = queryColumns
+        query.columnsB = cte.columns
+        query.joinedSource = cte.name
+        return query
+    }
+}
+
+extension Query {
+    /// Declares a recursive CTE: an anchor, then a step that joins the rows
+    /// found so far.
+    ///
+    /// ```swift
+    /// let tree = CommonTable<Category>("tree")
+    ///
+    /// Category.all
+    ///     .withRecursive(tree, anchor: Category.where { $0.parentID == nil }) { found in
+    ///         Category.join(found, on: { child, parent in child.parentID == parent.id })
+    ///     }
+    ///     .reading(from: tree)
+    /// ```
+    ///
+    /// The step receives the CTE being defined, which is the only way to
+    /// write one: it refers to itself. Before this, the step had to be raw
+    /// SQL — no entity describes a relation that does not exist yet, and the
+    /// handle is what changed that.
+    ///
+    /// Both halves select the entity's full column list, which is what
+    /// `UNION ALL` requires of them and what lets the result be read back as
+    /// the entity.
+    ///
+    /// - Note: The step must reduce, or Postgres will happily recurse until
+    ///   the connection dies. A cycle in the data needs a guard the database
+    ///   can see — a depth column, or `CYCLE` on a newer server.
+    public func withRecursive<T: Table>(
+        _ table: CommonTable<T>,
+        anchor: Query<T, T>,
+        step build: (CommonTable<T>) -> JoinedQuery<T, T, T>
+    ) -> Query {
+        let stepQuery = build(table)
+        var next = self
+        next.ctes.append(
+            CommonTableExpression(
+                name: table.name, isRecursive: true,
+                body: .query { writer in
+                    let head = SQLRenderer.selectText(anchor, writer: &writer)
+                    // Qualified for the step, and only the step. A join's
+                    // renderer assumes its caller has already set this — the
+                    // statement-level entry points do — and without it the ON
+                    // clause comes out as `ON ("parent_id" = "id")`, which
+                    // Postgres rejects as ambiguous because both sides of the
+                    // join expose both columns.
+                    let wasQualified = writer.qualified
+                    writer.qualified = true
+                    defer { writer.qualified = wasQualified }
+                    // The step's own columns come from the real table, so its
+                    // select list matches the anchor's positionally.
+                    let tail =
+                        (try? SQLRenderer.selectText(
+                            stepQuery, writer: &writer,
+                            overrideList: T.schema.qualifiedSelectList)) ?? ""
+                    return "\(head) UNION ALL \(tail)"
+                }))
+        return next
+    }
+}

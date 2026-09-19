@@ -24,6 +24,10 @@ public struct JoinedQuery<A: Table, B: Table, Result: Sendable>: Sendable {
     /// the `Aliased` entry points.
     var baseAlias: String? = nil
     var joinedAlias: String? = nil
+    /// A CTE name to join *instead of* `B`'s table — the recursive step's
+    /// `JOIN "tree"`, where the thing being joined has no table of its own.
+    /// Rendered bare: a CTE is already the name, so there is nothing to alias.
+    var joinedSource: String? = nil
     /// The column sets every composition closure receives — constructed at
     /// the join entry, so an aliased join's later `.where`/`.groupBy`
     /// closures see alias-qualified columns, not the frozen unaliased ones.
@@ -50,6 +54,7 @@ public struct JoinedQuery<A: Table, B: Table, Result: Sendable>: Sendable {
         var next = JoinedQuery<A, B, NewResult>(kind: kind, onPredicate: onPredicate)
         next.baseAlias = baseAlias
         next.joinedAlias = joinedAlias
+        next.joinedSource = joinedSource
         next.columnsA = columnsA
         next.columnsB = columnsB
         next.predicate = predicate
@@ -507,7 +512,11 @@ extension SQLRenderer {
         // reference in the statement is ambiguous. Aliases are how a
         // self-join satisfies this.
         let effectiveA = query.baseAlias ?? A.schema.name
-        let effectiveB = query.joinedAlias ?? B.schema.name
+        // A CTE's name is the name it joins under, so it distinguishes the
+        // two sides exactly as an alias does — which is what makes joining an
+        // entity to a CTE *over that same entity* legal rather than a
+        // self-join without aliases.
+        let effectiveB = query.joinedSource ?? query.joinedAlias ?? B.schema.name
         guard effectiveA != effectiveB else {
             throw HangarError.invalidProjection(
                 table: A.schema.name,
@@ -518,8 +527,10 @@ extension SQLRenderer {
         }
         var sql = "FROM \(A.schema.quotedName)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }
-        sql += " \(query.kind.rawValue) \(B.schema.quotedName)"
-        if let alias = query.joinedAlias { sql += " AS \(quote(alias))" }
+        sql += " \(query.kind.rawValue) \(query.joinedSource.map(quote) ?? B.schema.quotedName)"
+        if query.joinedSource == nil, let alias = query.joinedAlias {
+            sql += " AS \(quote(alias))"
+        }
         sql += " ON \(SQLRenderer.render(query.effectiveOnPredicate.expression, writer: &writer))"
         return sql
     }

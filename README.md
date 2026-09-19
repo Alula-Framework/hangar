@@ -597,6 +597,26 @@ one column out of it for a membership test. Declaring the same CTE twice
 declares it once, because a `WITH` list that names it twice is an error rather
 than a query.
 
+A recursive CTE is the same value, defined in terms of itself:
+
+```swift
+let tree = CommonTable<Node>("tree")
+
+try await repo.all(
+    Node.all
+        .withRecursive(tree, anchor: Node.where { $0.name == "root" }) { found in
+            Node.join(found, on: { child, parent in child.parentID == parent.id })
+        }
+        .reading(from: tree))
+```
+
+The step receives the CTE being defined and joins it — `JOIN "tree"`, not the
+entity's table — which is the only way to write one, since it refers to itself.
+The step used to have to be raw SQL for exactly that reason: no entity
+describes a relation that does not exist yet. The step must reduce, or Postgres
+will recurse until the connection dies; a cycle in the data needs a guard the
+database can see.
+
 A CTE body is a whole-row query by construction. That is the guarantee that
 makes reading it back as the entity safe: a projection would not expose the
 entity's columns, so narrowing belongs on the reference side, not the body.
