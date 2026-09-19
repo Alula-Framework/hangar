@@ -4,6 +4,77 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-19
+
+Common table expressions as values. Additive: nothing public was removed or
+re-signed, and the string-based spelling still works.
+
+### Added
+
+- **A CTE is a value you build once.** The name and the body travel together,
+  so a declaration and a reference cannot disagree:
+
+      let popular = CommonTable<Post>("popular")
+          .where { $0.viewCount > 1_000 }
+          .order { $0.viewCount.desc() }
+          .limit(50)
+
+      Post.all
+          .with(popular)
+          .where { $0.authorID.in(popular.select { $0.authorID }) }
+
+  The old spelling took the name twice — `with("popular", as:)` and then
+  `reading(from: "popular")` — with nothing checking they matched, so a
+  misspelling was a runtime error about a relation that does not exist.
+  `popular.all` reads whole rows back, `popular.select { … }` takes one column
+  out, and `reading(from: popular)` is typed too. Declaring the same CTE twice
+  declares it once.
+
+  A CTE body is a whole-row query by construction, which is the guarantee that
+  makes reading it back as the entity safe: a projection would not expose the
+  entity's columns, so column-narrowing lives on the reference side.
+
+- **A recursive CTE's step is typed.** It used to have to be raw SQL, for a
+  real reason — the step refers to the CTE being defined, and no entity
+  describes a relation that does not exist yet. The handle is what changed
+  that:
+
+      Node.all
+          .withRecursive(tree, anchor: Node.where { $0.name == "root" }) { found in
+              Node.join(found, on: { child, parent in child.parentID == parent.id })
+          }
+          .reading(from: tree)
+
+  A join may now name a CTE as its source — rendered bare, since a CTE is
+  already a name — and that name satisfies the two-distinct-names guard
+  exactly as an alias does, which is what makes joining an entity to a CTE
+  over that same entity legal rather than an unaliased self-join.
+
+- **`CYCLE`, for a walk over a graph rather than a tree.**
+
+      let tree = CommonTable<Node>("tree").detectingCycles(on: { $0.id })
+
+  Without it Postgres walks a cycle until the connection dies; measured, an
+  unguarded walk over a three-node cycle returns 20,000 rows and keeps going.
+  With it, recursion stops at the row that closes the cycle, and that row — a
+  duplicate of one already returned — is dropped when the CTE is read back;
+  `includingCycleClosers: true` keeps it. Requires Postgres 14 or later.
+
+  Whether you need it is not something a signature can tell you: a cycle is a
+  property of the data, and the same walk is finite over a tree and endless
+  over a graph. What the type can do is make asking for it one call.
+
+  The marker columns `CYCLE` adds are invisible, because this package writes an
+  explicit column list for every read and never `*`.
+
+### Documentation
+
+- The README's examples for everything 0.7.0 added — window functions, frames,
+  set operations, scalar subqueries, NULLS placement — are compiled snippets
+  now. They were prose, and `Snippets/CTEShapes.swift` still demonstrated the
+  string-based CTE API while the README had moved on. Verified by renaming a
+  function and watching the build fail at the snippet that used it.
+
 ## [0.7.0] - 2026-09-19
 
 Analytic SQL: window functions with frames, set operations, and correlated
