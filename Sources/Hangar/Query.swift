@@ -63,6 +63,25 @@ extension Table {
     public static var all: Query<Self, Self> { Query() }
 
     /// `Self.where { }` — sugar for `all.where { }`.
+    // swift-format's AmbiguousTrailingClosureOverload rule flags this pair, and
+    // the ambiguity is the mechanism. This overload exists only to be selected
+    // for an aggregate operand and refuse it with a message; the two are told
+    // apart by the closure's return type, which is exactly the case the rule
+    // warns about in general and the intent here.
+    @available(
+        *, unavailable,
+        message: """
+            Aggregate functions are not allowed in WHERE — Postgres rejects this. WHERE
+            chooses the rows that feed the aggregate, so it cannot also read it. Group the
+            rows and use HAVING instead: `.groupBy { $0.someColumn }.having { ... }`.
+            """
+    )
+    public static func `where`(
+        _ build: (QueryColumns) -> AggregatePredicate
+    ) -> Query<Self, Self> {
+        fatalError("unavailable")
+    }
+
     public static func `where`(
         _ build: (QueryColumns) -> some PredicateConvertible
     ) -> Query<Self, Self> {
@@ -112,6 +131,25 @@ extension Query {
     /// Adds a condition, AND-combined with any existing ones — chained
     /// `where` calls narrow the result, which is what makes conditional
     /// composition work.
+    // swift-format's AmbiguousTrailingClosureOverload rule flags this pair, and
+    // the ambiguity is the mechanism. This overload exists only to be selected
+    // for an aggregate operand and refuse it with a message; the two are told
+    // apart by the closure's return type, which is exactly the case the rule
+    // warns about in general and the intent here.
+    @available(
+        *, unavailable,
+        message: """
+            Aggregate functions are not allowed in WHERE — Postgres rejects this. WHERE
+            chooses the rows that feed the aggregate, so it cannot also read it. Group the
+            rows and use HAVING instead: `.groupBy { $0.someColumn }.having { ... }`.
+            """
+    )
+    public func `where`(
+        _ build: (Model.QueryColumns) -> AggregatePredicate
+    ) -> Query<Model, Result> {
+        fatalError("unavailable")
+    }
+
     public func `where`(
         _ build: (Model.QueryColumns) -> some PredicateConvertible
     ) -> Query<Model, Result> {
@@ -198,12 +236,13 @@ extension Query {
     /// HAVING over aggregate expressions; chained calls AND-combine:
     /// `.groupBy { $0.authorID }.having { $0.viewCount.sum > 100 }`.
     public func having(
-        _ build: (Model.QueryColumns) -> some PredicateConvertible
+        _ build: (Model.QueryColumns) -> some HavingConvertible
     ) -> Query<Model, Result> {
         var next = self
-        let added = build(Model.queryColumns).predicate
+        let added = build(Model.queryColumns)._havingPredicate
         if let existing = next.having {
-            next.having = Predicate(expression: .infix("AND", existing.expression, added.expression))
+            next.having = Predicate(
+                expression: .infix("AND", existing.expression, added.expression))
         } else {
             next.having = added
         }
@@ -237,7 +276,8 @@ extension Query {
                 var index = 0
                 func next<T: PostgresDecodable>(_ type: T.Type) throws -> T {
                     defer { index += 1 }
-                    return try _decodeColumn(T.self, from: cells[index], table: table, column: "#\(index)")
+                    return try _decodeColumn(
+                        T.self, from: cells[index], table: table, column: "#\(index)")
                 }
                 return (repeat try next((each S).Value.self))
             })
@@ -265,13 +305,17 @@ extension Query {
                 guard let label = child.label, !label.hasPrefix(".") else {
                     invalid = .invalidProjection(
                         table: Model.schema.name,
-                        reason: "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by.")
+                        reason:
+                            "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by."
+                    )
                     break
                 }
                 guard let selectable = child.value as? any Selectable else {
                     invalid = .invalidProjection(
                         table: Model.schema.name,
-                        reason: "select(into:) tuple element '\(label)' is not a column or aggregate expression.")
+                        reason:
+                            "select(into:) tuple element '\(label)' is not a column or aggregate expression."
+                    )
                     break
                 }
                 items.append((selectable._selectFragment.expression, label))
@@ -279,11 +323,14 @@ extension Query {
         } else {
             invalid = .invalidProjection(
                 table: Model.schema.name,
-                reason: "select(into:) takes a labeled tuple of at least two columns/aggregates, e.g. { (id: $0.id, total: $0.viewCount.sum()) }.")
+                reason:
+                    "select(into:) takes a labeled tuple of at least two columns/aggregates, e.g. { (id: $0.id, total: $0.viewCount.sum()) }."
+            )
         }
         return rebinding(
             to: Selection(items: items, invalid: invalid) { row in
-                try T(from: ProjectionDecoder(row: row.makeRandomAccess(), table: Model.schema.name))
+                try T(
+                    from: ProjectionDecoder(row: row.makeRandomAccess(), table: Model.schema.name))
             })
     }
 

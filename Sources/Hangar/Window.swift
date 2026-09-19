@@ -62,7 +62,7 @@ extension SelectExpression {
     /// ```
     ///
     /// With no builder it is `OVER ()`: the whole result set.
-    public func over(_ build: (Window) -> Window = { $0 }) -> SelectExpression<Value> {
+    public func over(_ build: (Window) -> Window = { $0 }) -> WindowExpression<Value> {
         let specification = build(Window()).specification
         // The window binds tighter than a cast: `sum(x)` renders as
         // `(sum(x))::bigint` so integer sums decode, and the window belongs
@@ -72,9 +72,9 @@ extension SelectExpression {
         // the first version of this shipped with a render test asserting the
         // broken spelling was correct.
         if case .cast(let inner, let type) = expression {
-            return SelectExpression<Value>(expression: .cast(.window(inner, specification), type))
+            return WindowExpression<Value>(expression: .cast(.window(inner, specification), type))
         }
-        return SelectExpression<Value>(expression: .window(expression, specification))
+        return WindowExpression<Value>(expression: .window(expression, specification))
     }
 }
 
@@ -94,10 +94,10 @@ public struct WindowOnlyFunction<Value>: Sendable {
 
     /// Fix this function to a window. Required — it is the only thing you can
     /// do with this value.
-    public func over(_ build: (Window) -> Window = { $0 }) -> SelectExpression<Value> {
+    public func over(_ build: (Window) -> Window = { $0 }) -> WindowExpression<Value> {
         let windowed = SQLExpression.window(function, build(Window()).specification)
-        guard let castTo else { return SelectExpression<Value>(expression: windowed) }
-        return SelectExpression<Value>(expression: .cast(windowed, castTo))
+        guard let castTo else { return WindowExpression<Value>(expression: windowed) }
+        return WindowExpression<Value>(expression: .cast(windowed, castTo))
     }
 }
 
@@ -147,3 +147,83 @@ extension Column {
             castTo: nil)
     }
 }
+
+/// The result of `.over` — selectable, and deliberately not comparable.
+///
+/// Postgres rejects a window function in `WHERE` and in `HAVING`:
+///
+///     ERROR:  window functions are not allowed in WHERE
+///     ERROR:  window functions are not allowed in HAVING
+///
+/// Both used to compile here and fail at the server, on the first request that
+/// ran the query. They are compile errors now, because this type carries no
+/// comparison operators — and the unavailable overloads below exist so the
+/// compiler says *why* instead of "binary operator cannot be applied".
+public struct WindowExpression<Value>: Sendable, Selectable {
+    let expression: SQLExpression
+
+    /// The expression as a SELECT-list item — not user API.
+    public var _selectFragment: SelectFragment { SelectFragment(expression: expression) }
+}
+
+// MARK: - Comparisons that would be invalid SQL
+//
+// Declared only to be unavailable. Overload resolution picks them for a
+// windowed operand and reports the message, which is the whole point: a
+// missing operator gives a reader nothing to act on, and this mistake has a
+// specific fix worth naming.
+
+@available(
+    *, unavailable,
+    message: """
+        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        A window is computed after those clauses have already chosen the rows, so it
+        cannot decide which rows they choose. Select it here, put this query in a CTE
+        with `.with(...)`, and compare the column in the outer query.
+        """
+)
+public func > <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
+
+@available(
+    *, unavailable,
+    message: """
+        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        A window is computed after those clauses have already chosen the rows, so it
+        cannot decide which rows they choose. Select it here, put this query in a CTE
+        with `.with(...)`, and compare the column in the outer query.
+        """
+)
+public func >= <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
+
+@available(
+    *, unavailable,
+    message: """
+        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        A window is computed after those clauses have already chosen the rows, so it
+        cannot decide which rows they choose. Select it here, put this query in a CTE
+        with `.with(...)`, and compare the column in the outer query.
+        """
+)
+public func < <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
+
+@available(
+    *, unavailable,
+    message: """
+        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        A window is computed after those clauses have already chosen the rows, so it
+        cannot decide which rows they choose. Select it here, put this query in a CTE
+        with `.with(...)`, and compare the column in the outer query.
+        """
+)
+public func <= <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
+
+@available(
+    *, unavailable,
+    message: """
+        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        A window is computed after those clauses have already chosen the rows, so it
+        cannot decide which rows they choose. Select it here, put this query in a CTE
+        with `.with(...)`, and compare the column in the outer query.
+        """
+)
+public func == <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }

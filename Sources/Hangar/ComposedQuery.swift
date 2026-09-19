@@ -212,9 +212,9 @@ public final class QueryBuilder<Base: Table> {
 
     /// ANDs a HAVING condition — the post-grouping filter.
     @discardableResult
-    public func having(_ condition: some PredicateConvertible) -> QueryBuilder<Base> {
+    public func having(_ condition: some HavingConvertible) -> QueryBuilder<Base> {
         checkNotConsumed("having")
-        having = Self.combine(having, condition.predicate, "AND")
+        having = Self.combine(having, condition._havingPredicate, "AND")
         return self
     }
 

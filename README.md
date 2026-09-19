@@ -414,6 +414,35 @@ A query carrying a clause the statement cannot honor — `limit`, `order`,
 **Changesets**, upserts, dynamic filters over an explicit allowlist, array
 columns (`text[]`, `integer[]`, ...), and read-replica routing.
 
+## Queries Postgres would reject do not compile
+
+Three mistakes that used to reach the server and fail there are build errors
+now, each naming the rule it breaks and the fix:
+
+```swift
+Post.where { $0.viewCount.sum() > 5 }
+// error: 'where' is unavailable: Aggregate functions are not allowed in WHERE
+// — Postgres rejects this. WHERE chooses the rows that feed the aggregate, so
+// it cannot also read it. Group the rows and use HAVING instead:
+// `.groupBy { $0.someColumn }.having { ... }`.
+
+Post.all.groupBy { $0.authorID }.having { $0.viewCount.sum().over() > 5 }
+// error: '>' is unavailable: Window functions are not allowed in WHERE or
+// HAVING — Postgres rejects this. A window is computed after those clauses
+// have already chosen the rows, so it cannot decide which rows they choose.
+// Select it here, put this query in a CTE with `.with(...)`, and compare the
+// column in the outer query.
+```
+
+An aggregate comparison is an `AggregatePredicate` and a windowed one is a
+`WindowExpression`; `where` accepts neither, and `having` accepts the first.
+The types are the enforcement, and the unavailable overloads exist so the
+compiler explains rather than saying "binary operator cannot be applied".
+
+`CI/check-invalid-queries-fail.sh` compiles a package of these queries on every
+push and fails if any of them builds — a compile-time guarantee is exactly the
+kind of claim that rots silently when an overload is widened.
+
 ## Safety
 
 Identifiers are always quoted with embedded quotes doubled. Values are always

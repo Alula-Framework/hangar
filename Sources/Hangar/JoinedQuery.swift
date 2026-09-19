@@ -324,10 +324,10 @@ extension JoinedQuery {
 
     /// ANDs a HAVING condition — the post-grouping filter.
     public func having(
-        _ build: (A.QueryColumns, B.QueryColumns) -> some PredicateConvertible
+        _ build: (A.QueryColumns, B.QueryColumns) -> some HavingConvertible
     ) -> JoinedQuery<A, B, Result> {
         var next = self
-        let added = build(columnsA, columnsB).predicate
+        let added = build(columnsA, columnsB)._havingPredicate
         if let existing = next.having {
             next.having = Predicate(expression: .infix("AND", existing.expression, added.expression))
         } else {

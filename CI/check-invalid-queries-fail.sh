@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Asserts that queries Postgres rejects do not compile.
+#
+# Hangar's claim is that a broken query is a build error rather than a failed
+# request. A claim like that rots quietly: widen one overload and the invalid
+# form starts compiling again, every test still passes, and nobody learns until
+# a query reaches a server. So this compiles a package of deliberately invalid
+# queries and fails if the build SUCCEEDS.
+#
+# It also checks the message. An error that says "binary operator cannot be
+# applied" is technically a caught mistake and practically a dead end; these
+# errors name the Postgres rule and the fix, and that is worth pinning too.
+set -uo pipefail
+cd "$(dirname "$0")/invalid-queries"
+
+output=$(swift build 2>&1)
+status=$?
+
+if [ $status -eq 0 ]; then
+  echo "::error::invalid queries compiled — the compile-time guarantee has regressed"
+  exit 1
+fi
+
+missing=0
+while IFS= read -r phrase; do
+  if ! grep -qF "$phrase" <<< "$output"; then
+    echo "::error::the build failed, but no diagnostic mentioned: $phrase"
+    missing=1
+  fi
+done <<'PHRASES'
+Aggregate functions are not allowed in WHERE
+Window functions are not allowed in WHERE or HAVING
+.groupBy { $0.someColumn }.having { ... }
+PHRASES
+
+if [ $missing -ne 0 ]; then
+  echo "--- build output ---"
+  echo "$output"
+  exit 1
+fi
+
+echo "invalid queries are compile errors, and each names its fix"

@@ -75,6 +75,11 @@ jobs:
           HANGAR_TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/hangar_test
         run: ./CI/run-tests.sh
 
+      # The compile-time claim, checked the only way it can be: by trying to
+      # compile queries Postgres would reject, and failing if they build.
+      - name: Invalid queries do not compile
+        run: ./CI/check-invalid-queries-fail.sh
+
   macos:
     name: Build on macOS
     runs-on: macos-15

@@ -92,55 +92,75 @@ extension Column where Value: Comparable & ColumnCodable {
 // MARK: - Aggregate comparisons (for `having`, )
 
 /// Aggregate equality, for `having` — `$0.id.count() == 3`.
-public func == <V: ColumnCodable & Equatable>(lhs: SelectExpression<V>, rhs: V) -> Predicate {
-    Predicate(expression: .infix("=", lhs.expression, .bind(SQLBind(rhs))))
+public func == <V: ColumnCodable & Equatable>(lhs: SelectExpression<V>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix("=", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Aggregate comparison, for `having` — `$0.viewCount.sum() > 1_000`.
-public func > <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V) -> Predicate {
-    Predicate(expression: .infix(">", lhs.expression, .bind(SQLBind(rhs))))
+public func > <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix(">", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Aggregate comparison, for `having`.
-public func >= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V) -> Predicate {
-    Predicate(expression: .infix(">=", lhs.expression, .bind(SQLBind(rhs))))
+public func >= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix(">=", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Aggregate comparison, for `having`.
-public func < <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V) -> Predicate {
-    Predicate(expression: .infix("<", lhs.expression, .bind(SQLBind(rhs))))
+public func < <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix("<", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Aggregate comparison, for `having`.
-public func <= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V) -> Predicate {
-    Predicate(expression: .infix("<=", lhs.expression, .bind(SQLBind(rhs))))
+public func <= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix("<=", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 // Nullable aggregates (sum/avg/min/max) compare against non-nil values;
 // SQL's NULL comparison semantics (never true) carry through unchanged.
 /// Nullable-aggregate equality: SQL NULL compares as never-true, unchanged.
-public func == <V: ColumnCodable & Equatable>(lhs: SelectExpression<V?>, rhs: V) -> Predicate {
-    Predicate(expression: .infix("=", lhs.expression, .bind(SQLBind(rhs))))
+public func == <V: ColumnCodable & Equatable>(lhs: SelectExpression<V?>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix("=", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Nullable-aggregate comparison: SQL NULL compares as never-true, unchanged.
-public func > <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V) -> Predicate {
-    Predicate(expression: .infix(">", lhs.expression, .bind(SQLBind(rhs))))
+public func > <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix(">", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Nullable-aggregate comparison: SQL NULL compares as never-true, unchanged.
-public func >= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V) -> Predicate {
-    Predicate(expression: .infix(">=", lhs.expression, .bind(SQLBind(rhs))))
+public func >= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix(">=", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Nullable-aggregate comparison: SQL NULL compares as never-true, unchanged.
-public func < <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V) -> Predicate {
-    Predicate(expression: .infix("<", lhs.expression, .bind(SQLBind(rhs))))
+public func < <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix("<", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 /// Nullable-aggregate comparison: SQL NULL compares as never-true, unchanged.
-public func <= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V) -> Predicate {
-    Predicate(expression: .infix("<=", lhs.expression, .bind(SQLBind(rhs))))
+public func <= <V: ColumnCodable & Comparable>(lhs: SelectExpression<V?>, rhs: V)
+    -> AggregatePredicate
+{
+    AggregatePredicate(expression: .infix("<=", lhs.expression, .bind(SQLBind(rhs))))
 }
 
 // MARK: - The selection a query carries

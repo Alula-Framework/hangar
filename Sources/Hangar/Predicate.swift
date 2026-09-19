@@ -57,10 +57,42 @@ public struct Predicate: Sendable {
     let expression: SQLExpression
 }
 
+/// A comparison against an aggregate — what `having` takes and `where` will
+/// not.
+///
+/// Postgres rejects an aggregate in `WHERE`:
+///
+///     ERROR:  aggregate functions are not allowed in WHERE
+///
+/// `WHERE` chooses the rows that feed the aggregate, so it cannot also read
+/// it. Keeping the two comparison results in different types is what makes
+/// that a compile error here rather than a failed request: `sum() > 5` is an
+/// `AggregatePredicate`, and `where` has no overload that accepts one except
+/// the unavailable overload that explains the fix.
+public struct AggregatePredicate: Sendable, HavingConvertible {
+    let expression: SQLExpression
+
+    /// Not user API — how `having` reads it.
+    public var _havingPredicate: Predicate { Predicate(expression: expression) }
+}
+
+/// Anything `having` accepts: a plain predicate on a grouped column, or a
+/// comparison against an aggregate.
+public protocol HavingConvertible: Sendable {
+    /// Not user API.
+    var _havingPredicate: Predicate { get }
+}
+
+extension PredicateConvertible {
+    /// Every plain predicate is a valid `HAVING` too — grouping columns may be
+    /// compared there, and often are.
+    public var _havingPredicate: Predicate { predicate }
+}
+
 /// Anything usable where a predicate is expected. `Predicate` itself
 /// conforms, and so does `Column<Bool>` — which is what makes the bare
 /// `Post.where { $0.published }` spelling work.
-public protocol PredicateConvertible: Sendable {
+public protocol PredicateConvertible: Sendable, HavingConvertible {
     var predicate: Predicate { get }
 }
 
@@ -68,6 +100,8 @@ extension Predicate: PredicateConvertible {
     /// A predicate is trivially predicate-convertible — identity.
     public var predicate: Predicate { self }
 }
+
+extension Column: HavingConvertible where Value == Bool {}
 
 extension Column: PredicateConvertible where Value == Bool {
     /// A boolean column stands alone as a predicate: `.where { $0.published }`.
