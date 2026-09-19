@@ -27,6 +27,16 @@ public struct CommonTableExpression: Sendable {
     /// Postgres puts it there, outside the parentheses, because it is a
     /// property of the recursion rather than of the query inside it.
     var trailingClause: String? = nil
+    /// This CTE's body as text, from a fresh writer — for comparing two
+    /// declarations that share a name. Cheap, and only on that collision.
+    func renderedBody() -> String {
+        var writer = BindWriter()
+        switch body {
+        case .fragment(let parts): return SQLRenderer.renderParts(parts, writer: &writer)
+        case .query(let render): return render(&writer)
+        }
+    }
+
     /// Which `CommonTable` value declared this, when one did. Two
     /// declarations of the same value are one declaration; two different
     /// values under one name are a mistake worth refusing.

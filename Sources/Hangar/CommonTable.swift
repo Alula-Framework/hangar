@@ -189,10 +189,23 @@ extension Query {
     /// The name comes from the value, so there is nothing to keep in sync.
     /// Declaring the same CTE twice keeps one declaration — a `WITH` list that
     /// names it twice is an error Postgres reports rather than a query.
+    /// A CTE's body as text, rendered from a fresh writer so two of them are
+    /// comparable.
+    static func renderBody<T>(of table: CommonTable<T>) -> String {
+        var writer = BindWriter()
+        return SQLRenderer.selectText(table.definition, writer: &writer)
+    }
+
     public func with<T>(_ table: CommonTable<T>) -> Query {
         if let existing = ctes.first(where: { $0.name == table.name }) {
             // Same value declared twice: keep the one declaration.
             if let declared = existing.identity, declared === table.identity { return self }
+            // Same *definition* under the same name is also one declaration,
+            // and it is not exotic: a factory returning `CommonTable("popular")`
+            // hands back a different value every call, and rejecting that
+            // would punish the obvious way to share a CTE. Compare what they
+            // render to, each from a fresh writer so the numbering matches.
+            if existing.renderedBody() == Self.renderBody(of: table) { return self }
             // Two different definitions under one name. Postgres would reject
             // a duplicate `WITH` entry, and dropping the second quietly is
             // worse — so refuse at the point the mistake is made.
