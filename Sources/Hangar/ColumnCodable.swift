@@ -235,7 +235,8 @@ public func _decodeJSONB<V: Decodable>(
     table: String,
     column: String
 ) throws -> V {
-    guard let value = try _decodeOptionalJSONB(type, from: cell, table: table, column: column) else {
+    guard let value = try _decodeOptionalJSONB(type, from: cell, table: table, column: column)
+    else {
         throw HangarError.jsonb(
             table: table, column: column,
             underlying: PostgresDecodingError.Code.missingData)

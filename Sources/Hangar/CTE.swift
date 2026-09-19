@@ -27,6 +27,10 @@ public struct CommonTableExpression: Sendable {
     /// Postgres puts it there, outside the parentheses, because it is a
     /// property of the recursion rather than of the query inside it.
     var trailingClause: String? = nil
+    /// Which `CommonTable` value declared this, when one did. Two
+    /// declarations of the same value are one declaration; two different
+    /// values under one name are a mistake worth refusing.
+    var identity: (any Sendable & AnyObject)? = nil
 
     enum Body: Sendable {
         /// A raw body with binds — the general case.

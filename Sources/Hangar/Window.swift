@@ -8,10 +8,21 @@
 // call site.
 //
 // **A window function belongs in the SELECT list.** Postgres rejects one in
-// `WHERE`, `GROUP BY` or `HAVING`, and so will your build — at the server
-// rather than the compiler, because `SelectExpression` carries the comparison
-// operators that `having` is built from and separating the two types would
-// cost more than the mistake does.
+// `WHERE` and in `HAVING`, and so does the compiler: `.over` returns a
+// `WindowExpression`, which carries no comparison operators, and the
+// unavailable overloads on it say why rather than leaving a reader with
+// "binary operator cannot be applied". `GROUP BY` takes a column rather than
+// an expression, so it was never spellable there.
+
+/// A frame offset is a count of rows, so it cannot be negative.
+///
+/// Postgres answers one that is with "frame starting offset must not be
+/// negative" on the request that runs it; this says the same thing at the
+/// call, which is where the literal was written.
+private func checkedOffset(_ offset: Int) -> Int {
+    precondition(offset >= 0, "a frame offset counts rows and cannot be negative, got \(offset)")
+    return offset
+}
 
 /// Where a frame starts.
 ///
@@ -38,9 +49,9 @@ public enum FrameStart: Sendable {
     var sql: String {
         switch self {
         case .unboundedPreceding: "UNBOUNDED PRECEDING"
-        case .preceding(let n): "\(n) PRECEDING"
+        case .preceding(let n): "\(checkedOffset(n)) PRECEDING"
         case .currentRow: "CURRENT ROW"
-        case .following(let n): "\(n) FOLLOWING"
+        case .following(let n): "\(checkedOffset(n)) FOLLOWING"
         }
     }
 
@@ -68,9 +79,9 @@ public enum FrameEnd: Sendable {
 
     var sql: String {
         switch self {
-        case .preceding(let n): "\(n) PRECEDING"
+        case .preceding(let n): "\(checkedOffset(n)) PRECEDING"
         case .currentRow: "CURRENT ROW"
-        case .following(let n): "\(n) FOLLOWING"
+        case .following(let n): "\(checkedOffset(n)) FOLLOWING"
         case .unboundedFollowing: "UNBOUNDED FOLLOWING"
         }
     }

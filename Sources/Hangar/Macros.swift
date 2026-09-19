@@ -22,8 +22,8 @@
 @attached(
     member,
     names: named(Columns), named(queryColumns), named(schema), named(tableName),
-        named(columns), named(init), named(_bind(for:)),
-        named(_changesetBind(column:value:)), named(_association(for:)))
+    named(columns), named(init), named(_bind(for:)),
+    named(_changesetBind(column:value:)), named(_association(for:)))
 @attached(extension, conformances: Table, TableModel)
 /// Declares a struct as a table-backed entity: generates the typed
 /// column set, schema metadata, row decoder, changeset metadata, and

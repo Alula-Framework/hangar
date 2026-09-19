@@ -110,64 +110,84 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noAmbientRepo:
-            return "No ambient Repo is bound on this task. Wrap the call in Repo.with(repo) { ... } — note that task-locals do not cross Task.detached."
+            return
+                "No ambient Repo is bound on this task. Wrap the call in Repo.with(repo) { ... } — note that task-locals do not cross Task.detached."
         case .tooManyRows(let table):
-            return "one(...) on \"\(table)\" matched more than one row; use all(...) or add a narrower predicate."
+            return
+                "one(...) on \"\(table)\" matched more than one row; use all(...) or add a narrower predicate."
         case .staleModel(let table):
-            return "The \"\(table)\" row for this model no longer exists — it was deleted concurrently or never inserted."
+            return
+                "The \"\(table)\" row for this model no longer exists — it was deleted concurrently or never inserted."
         case .notSoftDeletable(let table):
-            return "\"\(table)\" has no soft-delete column, so it cannot be soft-deleted or restored. Mark one with @Deleted (an optional Date), or use forceDelete to remove the row."
+            return
+                "\"\(table)\" has no soft-delete column, so it cannot be soft-deleted or restored. Mark one with @Deleted (an optional Date), or use forceDelete to remove the row."
         case .columnCountMismatch(let table, let expected, let got):
-            return "Decoding \"\(table)\": the row has \(got) columns but the entity expects \(expected) — the statement's column list and the @Entity type disagree."
+            return
+                "Decoding \"\(table)\": the row has \(got) columns but the entity expects \(expected) — the statement's column list and the @Entity type disagree."
         case .columnDecoding(let table, let column, let underlying):
             return "Decoding \"\(table)\".\"\(column)\" failed: \(underlying)"
         case .invalidEnumValue(let type, let value):
-            return "Postgres sent \"\(value)\" for enum \(type), which has no such case — the database enum and the Swift enum have diverged."
+            return
+                "Postgres sent \"\(value)\" for enum \(type), which has no such case — the database enum and the Swift enum have diverged."
         case .jsonb(let table, let column, let underlying):
             return "JSONB \"\(table)\".\"\(column)\" failed to encode/decode: \(underlying)"
         case .noUpdatableColumns(let table):
-            return "update on \"\(table)\": every column is primary-key or database-generated — there is nothing to SET."
+            return
+                "update on \"\(table)\": every column is primary-key or database-generated — there is nothing to SET."
         case .changesetValueMismatch(let table, let column):
-            return "changeset value for \"\(table)\".\"\(column)\" does not match the column's type — the TableModel metadata and the @Entity schema disagree."
+            return
+                "changeset value for \"\(table)\".\"\(column)\" does not match the column's type — the TableModel metadata and the @Entity schema disagree."
         case .updateWithoutIdentity(let table):
-            return "update(changeset) on \"\(table)\": the changeset has no original, so no primary key identifies the row. Build update changesets with Changeset(original:)."
+            return
+                "update(changeset) on \"\(table)\": the changeset has no original, so no primary key identifies the row. Build update changesets with Changeset(original:)."
         case .duplicateMultiStep(let name):
-            return "Multi has two steps named \"\(name)\" — step names key the results and must be unique."
+            return
+                "Multi has two steps named \"\(name)\" — step names key the results and must be unique."
         case .multiValueMissing(let key):
-            return "Multi has no result named \"\(key)\" — a step can only read keys of steps ordered before it."
+            return
+                "Multi has no result named \"\(key)\" — a step can only read keys of steps ordered before it."
         case .multiValueTypeMismatch(let key, let stored, let requested):
-            return "Multi result \"\(key)\" is \(stored), not \(requested) — two MultiKeys share a name with different types."
+            return
+                "Multi result \"\(key)\" is \(stored), not \(requested) — two MultiKeys share a name with different types."
         case .notPreloaded(let association):
-            return "Association \"\(association)\" was not preloaded. Add .preload(\\.\(association)) to the query that fetched this model."
+            return
+                "Association \"\(association)\" was not preloaded. Add .preload(\\.\(association)) to the query that fetched this model."
         case .unknownAssociation(let table, let association):
-            return "\"\(table)\" has no association metadata for \"\(association)\" — .preload takes a keypath to a @HasMany/@BelongsTo/@HasOne property."
+            return
+                "\"\(table)\" has no association metadata for \"\(association)\" — .preload takes a keypath to a @HasMany/@BelongsTo/@HasOne property."
         case .danglingBelongsTo(let table, let association):
-            return "Preloading \"\(table)\".\(association): the foreign key references a row that does not exist — the reference dangles."
+            return
+                "Preloading \"\(table)\".\(association): the foreign key references a row that does not exist — the reference dangles."
         case .invalidProjection(let table, let reason):
             return "Projection on \"\(table)\": \(reason)"
         case .unknownFilterField(let table, let field):
-            return "\"\(field)\" is not a filterable field of \"\(table)\" — dynamic filters only reach columns listed in `filterable`."
+            return
+                "\"\(field)\" is not a filterable field of \"\(table)\" — dynamic filters only reach columns listed in `filterable`."
         case .invalidFilterValue(let table, let field):
-            return "The value for dynamic filter \"\(field)\" on \"\(table)\" doesn't match the column's type."
+            return
+                "The value for dynamic filter \"\(field)\" on \"\(table)\" doesn't match the column's type."
         case .streamLeaseExpired:
-            return "This PostgresRowStream outlived its stream { } call. The connection lease ends when the closure returns — iterate the stream inside it."
+            return
+                "This PostgresRowStream outlived its stream { } call. The connection lease ends when the closure returns — iterate the stream inside it."
         case .bulkWriteClause(let table, let operation, let clause):
-            return "\(operation)(query) on \"\(table)\": the query carries \(clause), which \(operation.uppercased()) cannot honor — bulk writes take only a WHERE. Fetch with the full query and write row by row if you need the other clauses."
+            return
+                "\(operation)(query) on \"\(table)\": the query carries \(clause), which \(operation.uppercased()) cannot honor — bulk writes take only a WHERE. Fetch with the full query and write row by row if you need the other clauses."
         case .unknownColumn(let table, let column):
-            return "Internal error: entity \"\(table)\" has no binding for column \"\(column)\". This is a Hangar bug."
+            return
+                "Internal error: entity \"\(table)\" has no binding for column \"\(column)\". This is a Hangar bug."
         }
     }
 }
 
 #if canImport(Foundation)
-import Foundation
+    import Foundation
 
-extension HangarError: LocalizedError {
-    /// The same text as ``description``.
-    ///
-    /// Without this, `localizedDescription` — which most logging and
-    /// error-reporting code reaches for — discards every one of these
-    /// carefully written messages and reports a Foundation placeholder.
-    public var errorDescription: String? { description }
-}
+    extension HangarError: LocalizedError {
+        /// The same text as ``description``.
+        ///
+        /// Without this, `localizedDescription` — which most logging and
+        /// error-reporting code reaches for — discards every one of these
+        /// carefully written messages and reports a Foundation placeholder.
+        public var errorDescription: String? { description }
+    }
 #endif

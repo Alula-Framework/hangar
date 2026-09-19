@@ -24,12 +24,17 @@ struct ProjectionDecoder: Decoder {
 
     func unkeyedContainer() throws -> any UnkeyedDecodingContainer {
         throw DecodingError.dataCorrupted(
-            .init(codingPath: [], debugDescription: "A projection row decodes keyed fields, not an unkeyed collection."))
+            .init(
+                codingPath: [],
+                debugDescription:
+                    "A projection row decodes keyed fields, not an unkeyed collection."))
     }
 
     func singleValueContainer() throws -> any SingleValueDecodingContainer {
         throw DecodingError.dataCorrupted(
-            .init(codingPath: [], debugDescription: "A projection row decodes keyed fields, not a single value."))
+            .init(
+                codingPath: [],
+                debugDescription: "A projection row decodes keyed fields, not a single value."))
     }
 }
 
@@ -48,7 +53,10 @@ private struct ProjectionKeyedContainer<Key: CodingKey>: KeyedDecodingContainerP
         guard row.contains(key.stringValue) else {
             throw DecodingError.keyNotFound(
                 key,
-                .init(codingPath: [], debugDescription: "The SELECT list has no column aliased \"\(key.stringValue)\"."))
+                .init(
+                    codingPath: [],
+                    debugDescription:
+                        "The SELECT list has no column aliased \"\(key.stringValue)\"."))
         }
         return row[key.stringValue]
     }
@@ -88,18 +96,36 @@ private struct ProjectionKeyedContainer<Key: CodingKey>: KeyedDecodingContainerP
             type,
             .init(
                 codingPath: [key],
-                debugDescription: "\"\(key.stringValue)\" (\(type)) is not decodable from a projection cell — supported: PostgresNIO-decodable types and Codable values in json/jsonb columns."))
+                debugDescription:
+                    "\"\(key.stringValue)\" (\(type)) is not decodable from a projection cell — supported: PostgresNIO-decodable types and Codable values in json/jsonb columns."
+            ))
     }
 
     // The fixed-type requirements route through the generic path.
-    func decode(_ type: Bool.Type, forKey key: Key) throws -> Bool { try decodeValue(type, forKey: key) }
-    func decode(_ type: String.Type, forKey key: Key) throws -> String { try decodeValue(type, forKey: key) }
-    func decode(_ type: Double.Type, forKey key: Key) throws -> Double { try decodeValue(type, forKey: key) }
-    func decode(_ type: Float.Type, forKey key: Key) throws -> Float { try decodeValue(type, forKey: key) }
-    func decode(_ type: Int.Type, forKey key: Key) throws -> Int { try decodeValue(type, forKey: key) }
-    func decode(_ type: Int16.Type, forKey key: Key) throws -> Int16 { try decodeValue(type, forKey: key) }
-    func decode(_ type: Int32.Type, forKey key: Key) throws -> Int32 { try decodeValue(type, forKey: key) }
-    func decode(_ type: Int64.Type, forKey key: Key) throws -> Int64 { try decodeValue(type, forKey: key) }
+    func decode(_ type: Bool.Type, forKey key: Key) throws -> Bool {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: String.Type, forKey key: Key) throws -> String {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: Double.Type, forKey key: Key) throws -> Double {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: Float.Type, forKey key: Key) throws -> Float {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: Int.Type, forKey key: Key) throws -> Int {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: Int16.Type, forKey key: Key) throws -> Int16 {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: Int32.Type, forKey key: Key) throws -> Int32 {
+        try decodeValue(type, forKey: key)
+    }
+    func decode(_ type: Int64.Type, forKey key: Key) throws -> Int64 {
+        try decodeValue(type, forKey: key)
+    }
     func decode(_ type: Int8.Type, forKey key: Key) throws -> Int8 { throw mismatch(type, key) }
     func decode(_ type: UInt.Type, forKey key: Key) throws -> UInt { throw mismatch(type, key) }
     func decode(_ type: UInt8.Type, forKey key: Key) throws -> UInt8 { throw mismatch(type, key) }

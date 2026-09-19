@@ -29,6 +29,16 @@ import PostgresNIO
 ///     .where { $0.authorID.in(popular.select { $0.authorID }) }
 /// ```
 public struct CommonTable<T: Table>: Sendable {
+    /// Distinguishes two CTEs that share a name but are not the same value.
+    ///
+    /// Declaring one twice is an easy accident and harmless — a `WITH` list
+    /// naming it twice is a Postgres error, so the second is dropped. Two
+    /// *different* definitions under one name is a different thing entirely:
+    /// dropping the second leaves a query that refers to `popular` while
+    /// containing `recent`, which is valid SQL and the wrong answer.
+    final class Identity: Sendable {}
+    let identity: Identity
+
     /// The name this CTE is declared and referred to by.
     public let name: String
     /// What it selects — always whole rows of `T`.
@@ -38,6 +48,7 @@ public struct CommonTable<T: Table>: Sendable {
 
     /// An empty CTE over the whole table; narrow it with the builders below.
     public init(_ name: String) {
+        self.identity = Identity()
         self.name = name
         self.definition = T.all
         self.cycleKey = nil
@@ -179,13 +190,27 @@ extension Query {
     /// Declaring the same CTE twice keeps one declaration — a `WITH` list that
     /// names it twice is an error Postgres reports rather than a query.
     public func with<T>(_ table: CommonTable<T>) -> Query {
-        guard !ctes.contains(where: { $0.name == table.name }) else { return self }
+        if let existing = ctes.first(where: { $0.name == table.name }) {
+            // Same value declared twice: keep the one declaration.
+            if let declared = existing.identity, declared === table.identity { return self }
+            // Two different definitions under one name. Postgres would reject
+            // a duplicate `WITH` entry, and dropping the second quietly is
+            // worse — so refuse at the point the mistake is made.
+            preconditionFailure(
+                """
+                two different CTEs are both named "\(table.name)". A WITH list \
+                cannot name one twice, and keeping only the first would leave \
+                this query referring to a definition it does not contain. \
+                Give them distinct names.
+                """)
+        }
         var next = self
         let body = table.definition
         next.ctes.append(
             CommonTableExpression(
                 name: table.name, isRecursive: false,
-                body: .query { writer in SQLRenderer.selectText(body, writer: &writer) }))
+                body: .query { writer in SQLRenderer.selectText(body, writer: &writer) },
+                identity: table.identity))
         return next
     }
 }
@@ -287,10 +312,19 @@ extension Query {
                     defer { writer.qualified = wasQualified }
                     // The step's own columns come from the real table, so its
                     // select list matches the anchor's positionally.
-                    let tail =
-                        (try? SQLRenderer.selectText(
+                    // Not `try?`. A step that cannot render used to become an
+                    // empty string, turning a local, nameable failure into
+                    // `anchor UNION ALL ` — malformed SQL blamed on Postgres a
+                    // layer later. Carry the reason into the statement so the
+                    // server quotes it back.
+                    let tail: String
+                    do {
+                        tail = try SQLRenderer.selectText(
                             stepQuery, writer: &writer,
-                            overrideList: T.schema.qualifiedSelectList)) ?? ""
+                            overrideList: T.schema.qualifiedSelectList)
+                    } catch {
+                        tail = "-- hangar could not render the recursive step: \(error)"
+                    }
                     return "\(head) UNION ALL \(tail)"
                 },
                 trailingClause: cycleClause))

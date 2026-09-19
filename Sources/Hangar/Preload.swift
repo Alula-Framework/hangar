@@ -23,11 +23,12 @@ public typealias PreloadKey = ColumnCodable & Hashable & PostgresArrayEncodable
 /// macro's expansion, not user API.
 public struct _HasManyLoader<Parent: Table, Child: Table>: Sendable {
     let name: String
-    let run: @Sendable (
-        _ parents: inout [Parent],
-        _ repo: Repo,
-        _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
-    ) async throws -> Void
+    let run:
+        @Sendable (
+            _ parents: inout [Parent],
+            _ repo: Repo,
+            _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
+        ) async throws -> Void
 }
 
 /// The loader behind `@HasMany(through:from:to:)` — deliberately not
@@ -35,33 +36,36 @@ public struct _HasManyLoader<Parent: Table, Child: Table>: Sendable {
 /// exactly the types they can see.
 public struct _HasManyThroughLoader<Parent: Table, Child: Table>: Sendable {
     let name: String
-    let run: @Sendable (
-        _ parents: inout [Parent],
-        _ repo: Repo,
-        _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
-    ) async throws -> Void
+    let run:
+        @Sendable (
+            _ parents: inout [Parent],
+            _ repo: Repo,
+            _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
+        ) async throws -> Void
 }
 
 /// `@BelongsTo` with a non-optional foreign key: every parent must find its
 /// row; a dangling reference throws rather than lying with `.notLoaded`.
 public struct _ToOneLoader<Parent: Table, Child: Table>: Sendable {
     let name: String
-    let run: @Sendable (
-        _ parents: inout [Parent],
-        _ repo: Repo,
-        _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
-    ) async throws -> Void
+    let run:
+        @Sendable (
+            _ parents: inout [Parent],
+            _ repo: Repo,
+            _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
+        ) async throws -> Void
 }
 
 /// `@HasOne`, or `@BelongsTo` over an optional foreign key: absence is
 /// data, expressed as `.loaded(nil)` — distinct from `.notLoaded`.
 public struct _OptionalToOneLoader<Parent: Table, Child: Table>: Sendable {
     let name: String
-    let run: @Sendable (
-        _ parents: inout [Parent],
-        _ repo: Repo,
-        _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
-    ) async throws -> Void
+    let run:
+        @Sendable (
+            _ parents: inout [Parent],
+            _ repo: Repo,
+            _ tune: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child>
+        ) async throws -> Void
 }
 
 // MARK: - Factories (called from @Entity-generated metadata)
@@ -131,7 +135,8 @@ public func _belongsTo<Parent: Table, Child: Table, Key: PreloadKey>(
         // that traps on a duplicate, and a `references:` pointed at a
         // non-unique column is a user mistake, not a Hangar invariant —
         // the rule is: fail the request, never the node.
-        let indexed = Dictionary(related.map { ($0[keyPath: relatedKey], $0) }) { first, _ in first }
+        let indexed = Dictionary(related.map { ($0[keyPath: relatedKey], $0) }) { first, _ in first
+        }
         for index in parents.indices {
             guard let child = indexed[parents[index][keyPath: foreignKey]] else {
                 throw HangarError.danglingBelongsTo(table: Parent.schema.name, association: name)
@@ -152,12 +157,14 @@ public func _belongsTo<Parent: Table, Child: Table, Key: PreloadKey>(
     _OptionalToOneLoader(name: name) { parents, repo, tune in
         guard !parents.isEmpty else { return }
         let keys = Array(Set(parents.compactMap { $0[keyPath: foreignKey] }))
-        let related = keys.isEmpty
+        let related =
+            keys.isEmpty
             ? []
             : try await repo.all(
                 filtered(tune(Child.all), by: relatedKey, in: keys, association: name))
         // First row per key wins — see the non-optional overload above.
-        let indexed = Dictionary(related.map { ($0[keyPath: relatedKey], $0) }) { first, _ in first }
+        let indexed = Dictionary(related.map { ($0[keyPath: relatedKey], $0) }) { first, _ in first
+        }
         for index in parents.indices {
             guard let key = parents[index][keyPath: foreignKey] else {
                 parents[index][keyPath: target] = .loaded(nil)
@@ -248,7 +255,8 @@ public func _hasManyThrough<
             filtered(Through.all, by: throughFrom, in: parentKeys, association: name))
 
         let childKeys = Array(Set(throughRows.map { $0[keyPath: throughTo] }))
-        let children: [Child] = childKeys.isEmpty
+        let children: [Child] =
+            childKeys.isEmpty
             ? []
             : try await repo.all(
                 filtered(tune(Child.all), by: childKey, in: childKeys, association: name))
@@ -359,7 +367,8 @@ extension Query {
         _ association: WritableKeyPath<Model, Loadable<Child?>> & Sendable,
         _ nested: @escaping @Sendable (Query<Child, Child>) -> Query<Child, Child> = { $0 }
     ) -> Query<Model, Result> {
-        appendingPreload(association) { (loader: _OptionalToOneLoader<Model, Child>, parents, repo) in
+        appendingPreload(association) {
+            (loader: _OptionalToOneLoader<Model, Child>, parents, repo) in
             try await loader.run(&parents, repo, nested)
         }
     }

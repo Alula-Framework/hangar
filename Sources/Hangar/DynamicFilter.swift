@@ -50,7 +50,8 @@ public enum DynamicFilterValue: Sendable, Equatable, Decodable {
             throw DecodingError.dataCorrupted(
                 .init(
                     codingPath: decoder.codingPath,
-                    debugDescription: "A filter value must be a JSON scalar (string, number, boolean, or null)."))
+                    debugDescription:
+                        "A filter value must be a JSON scalar (string, number, boolean, or null)."))
         }
     }
 }

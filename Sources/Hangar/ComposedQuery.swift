@@ -364,7 +364,8 @@ public final class QueryBuilder<Base: Table> {
                 var index = 0
                 func next<V: PostgresDecodable>(_ type: V.Type) throws -> V {
                     defer { index += 1 }
-                    return try _decodeColumn(V.self, from: cells[index], table: table, column: "#\(index)")
+                    return try _decodeColumn(
+                        V.self, from: cells[index], table: table, column: "#\(index)")
                 }
                 return (repeat try next((each S).Value.self))
             })
@@ -386,13 +387,17 @@ public final class QueryBuilder<Base: Table> {
                 guard let label = child.label, !label.hasPrefix(".") else {
                     invalid = .invalidProjection(
                         table: Base.schema.name,
-                        reason: "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by.")
+                        reason:
+                            "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by."
+                    )
                     break
                 }
                 guard let selectable = child.value as? any Selectable else {
                     invalid = .invalidProjection(
                         table: Base.schema.name,
-                        reason: "select(into:) tuple element '\(label)' is not a column or aggregate expression.")
+                        reason:
+                            "select(into:) tuple element '\(label)' is not a column or aggregate expression."
+                    )
                     break
                 }
                 items.append((selectable._selectFragment.expression, label))
@@ -400,7 +405,9 @@ public final class QueryBuilder<Base: Table> {
         } else {
             invalid = .invalidProjection(
                 table: Base.schema.name,
-                reason: "select(into:) takes a labeled tuple of at least two columns/aggregates, e.g. { (id: order.id, total: item.quantity) }.")
+                reason:
+                    "select(into:) takes a labeled tuple of at least two columns/aggregates, e.g. { (id: order.id, total: item.quantity) }."
+            )
         }
         return assembled(
             selection: Selection(items: items, invalid: invalid) { row in
@@ -449,7 +456,9 @@ public final class QueryBuilder<Base: Table> {
             """)
     }
 
-    private static func combine(_ existing: Predicate?, _ added: Predicate, _ op: String) -> Predicate {
+    private static func combine(_ existing: Predicate?, _ added: Predicate, _ op: String)
+        -> Predicate
+    {
         guard let existing else { return added }
         return Predicate(expression: .infix(op, existing.expression, added.expression))
     }
@@ -536,7 +545,8 @@ extension SQLRenderer {
         } else {
             list = Base.schema.qualifiedSelectList(as: query.baseAlias)
         }
-        var sql = "SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list)"
+        var sql =
+            "SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list)"
         sql += " \(fromClause(query, writer: &writer))"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         if !query.grouping.isEmpty {
@@ -652,7 +662,9 @@ extension Repo {
         guard let selection = query.selection else {
             throw HangarError.invalidProjection(
                 table: Base.schema.name,
-                reason: "this composed query's Result is not \(Base.self) but no .select installed a projection — this is a Hangar bug.")
+                reason:
+                    "this composed query's Result is not \(Base.self) but no .select installed a projection — this is a Hangar bug."
+            )
         }
         if let invalid = selection.invalid {
             throw invalid
@@ -691,10 +703,12 @@ extension Repo {
     /// matches, not distinct base rows.
     public func count<Base: Table, R>(_ query: ComposedQuery<Base, R>) async throws -> Int {
         let statement = SQLRenderer.count(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: "count")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: "count")
         for try await row in sequence {
             let cells = row.makeRandomAccess()
-            return try _decodeColumn(Int.self, from: cells[0], table: Base.schema.name, column: "count")
+            return try _decodeColumn(
+                Int.self, from: cells[0], table: Base.schema.name, column: "count")
         }
         throw HangarError.columnCountMismatch(table: Base.schema.name, expected: 1, got: 0)
     }
@@ -703,10 +717,12 @@ extension Repo {
     /// `count`.
     public func exists<Base: Table, R>(_ query: ComposedQuery<Base, R>) async throws -> Bool {
         let statement = SQLRenderer.exists(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: "exists")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: "exists")
         for try await row in sequence {
             let cells = row.makeRandomAccess()
-            return try _decodeColumn(Bool.self, from: cells[0], table: Base.schema.name, column: "exists")
+            return try _decodeColumn(
+                Bool.self, from: cells[0], table: Base.schema.name, column: "exists")
         }
         throw HangarError.columnCountMismatch(table: Base.schema.name, expected: 1, got: 0)
     }

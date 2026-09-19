@@ -42,7 +42,9 @@ public struct JoinedQuery3<A: Table, B: Table, C: Table, Result: Sendable>: Send
     var preloads: [PreloadStep<A>] = []
     var selection: Selection<Result>? = nil
 
-    func rebinding<NewResult>(to selection: Selection<NewResult>) -> JoinedQuery3<A, B, C, NewResult> {
+    func rebinding<NewResult>(to selection: Selection<NewResult>) -> JoinedQuery3<
+        A, B, C, NewResult
+    > {
         var next = JoinedQuery3<A, B, C, NewResult>(
             kind1: kind1, on1: on1, kind2: kind2, on2: on2)
         next.baseAlias = baseAlias
@@ -198,7 +200,8 @@ extension JoinedQuery3 {
         var next = self
         let added = build(columnsA, columnsB, columnsC).predicate
         if let existing = next.predicate {
-            next.predicate = Predicate(expression: .infix("AND", existing.expression, added.expression))
+            next.predicate = Predicate(
+                expression: .infix("AND", existing.expression, added.expression))
         } else {
             next.predicate = added
         }
@@ -230,7 +233,8 @@ extension JoinedQuery3 {
         var next = self
         let added = build(columnsA, columnsB, columnsC)._havingPredicate
         if let existing = next.having {
-            next.having = Predicate(expression: .infix("AND", existing.expression, added.expression))
+            next.having = Predicate(
+                expression: .infix("AND", existing.expression, added.expression))
         } else {
             next.having = added
         }
@@ -290,7 +294,8 @@ extension JoinedQuery3 {
                 var index = 0
                 func next<T: PostgresDecodable>(_ type: T.Type) throws -> T {
                     defer { index += 1 }
-                    return try _decodeColumn(T.self, from: cells[index], table: table, column: "#\(index)")
+                    return try _decodeColumn(
+                        T.self, from: cells[index], table: table, column: "#\(index)")
                 }
                 return (repeat try next((each S).Value.self))
             })
@@ -310,13 +315,17 @@ extension JoinedQuery3 {
                 guard let label = child.label, !label.hasPrefix(".") else {
                     invalid = .invalidProjection(
                         table: A.schema.name,
-                        reason: "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by.")
+                        reason:
+                            "select(into:) needs a label on every tuple element — labels become the columns \(T.self) decodes by."
+                    )
                     break
                 }
                 guard let selectable = child.value as? any Selectable else {
                     invalid = .invalidProjection(
                         table: A.schema.name,
-                        reason: "select(into:) tuple element '\(label)' is not a column or aggregate expression.")
+                        reason:
+                            "select(into:) tuple element '\(label)' is not a column or aggregate expression."
+                    )
                     break
                 }
                 items.append((selectable._selectFragment.expression, label))
@@ -349,7 +358,9 @@ extension SQLRenderer {
         guard Set(effective).count == 3 else {
             throw HangarError.invalidProjection(
                 table: A.schema.name,
-                reason: "the three joined tables must expose distinct names — alias the repeated one: \(A.schema.name).alias(\"a\") ... .join(\(C.schema.name).alias(\"c\"), on: ...).")
+                reason:
+                    "the three joined tables must expose distinct names — alias the repeated one: \(A.schema.name).alias(\"a\") ... .join(\(C.schema.name).alias(\"c\"), on: ...)."
+            )
         }
         var sql = "FROM \(A.schema.quotedName)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }
@@ -388,7 +399,8 @@ extension SQLRenderer {
         } else {
             list = A.schema.qualifiedSelectList
         }
-        var sql = "SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list)"
+        var sql =
+            "SELECT \(distinctClause(query.isDistinct, query.distinctOn, writer: &writer))\(list)"
         sql += " \(from)"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         if !query.grouping.isEmpty {
@@ -494,7 +506,9 @@ extension Repo {
         guard let selection = query.selection else {
             throw HangarError.invalidProjection(
                 table: A.schema.name,
-                reason: "the joined query's Result is not \(A.self) but no .select {} installed a projection — this is a Hangar bug.")
+                reason:
+                    "the joined query's Result is not \(A.self) but no .select {} installed a projection — this is a Hangar bug."
+            )
         }
         if let invalid = selection.invalid {
             throw invalid
@@ -533,10 +547,12 @@ extension Repo {
     /// `count`.
     public func count<A, B, C, R>(_ query: JoinedQuery3<A, B, C, R>) async throws -> Int {
         let statement = try SQLRenderer.count(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: "count")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: "count")
         for try await row in sequence {
             let cells = row.makeRandomAccess()
-            return try _decodeColumn(Int.self, from: cells[0], table: A.schema.name, column: "count")
+            return try _decodeColumn(
+                Int.self, from: cells[0], table: A.schema.name, column: "count")
         }
         throw HangarError.columnCountMismatch(table: A.schema.name, expected: 1, got: 0)
     }
@@ -544,10 +560,12 @@ extension Repo {
     /// Whether any joined row matches — same clause rules as `count`.
     public func exists<A, B, C, R>(_ query: JoinedQuery3<A, B, C, R>) async throws -> Bool {
         let statement = try SQLRenderer.exists(query)
-        let sequence = try await execute(statement.postgresQuery(), intent: .read, operation: "exists")
+        let sequence = try await execute(
+            statement.postgresQuery(), intent: .read, operation: "exists")
         for try await row in sequence {
             let cells = row.makeRandomAccess()
-            return try _decodeColumn(Bool.self, from: cells[0], table: A.schema.name, column: "exists")
+            return try _decodeColumn(
+                Bool.self, from: cells[0], table: A.schema.name, column: "exists")
         }
         throw HangarError.columnCountMismatch(table: A.schema.name, expected: 1, got: 0)
     }

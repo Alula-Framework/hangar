@@ -60,7 +60,8 @@ extension SQLRenderer {
             }
         }
         let target = try columns(conflict.target)
-        let targetClause = target.isEmpty
+        let targetClause =
+            target.isEmpty
             ? "" : " (\(target.map(quote).joined(separator: ", ")))"
         switch conflict.action {
         case .nothing:

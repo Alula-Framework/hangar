@@ -26,9 +26,12 @@ struct ScalarSubqueryRenderingTests {
             ))
     }
 
-    @Test("a scalar column subquery takes LIMIT 1")
-    func scalarTakesLimit() {
-        let sql = SQLRenderer.select(
+    @Test("scalar keeps the cardinality error; scalarFirst opts out of it")
+    func limitIsExplicit() {
+        // No LIMIT: a subquery matching two rows is an error from Postgres,
+        // and that error is usually a uniqueness assumption announcing it does
+        // not hold. Taking the first row silently would hide it.
+        let strict = SQLRenderer.select(
             Post.select(into: Counted.self) { post in
                 (
                     title: post.title,
@@ -36,7 +39,17 @@ struct ScalarSubqueryRenderingTests {
                 )
             }
         ).sql
-        #expect(sql.contains("LIMIT 1)"))
+        #expect(!strict.contains("LIMIT 1)"))
+
+        let first = SQLRenderer.select(
+            Post.select(into: Counted.self) { post in
+                (
+                    title: post.title,
+                    comments: Comment.where { $0.postID == post.id }.scalarFirst { $0.id }
+                )
+            }
+        ).sql
+        #expect(first.contains("LIMIT 1)"))
     }
 
     @Test("binds inside the subquery are numbered with everything else")

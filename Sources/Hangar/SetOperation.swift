@@ -91,7 +91,31 @@ extension Query where Result == Model {
         let left = self
         let right = other
 
+        // Postgres refuses `FOR UPDATE` on a set operation or its branches:
+        // "FOR UPDATE is not allowed with UNION/INTERSECT/EXCEPT". Locking the
+        // branches and then combining them reads as though it would work, and
+        // the error arrives from the server on the request that runs it.
+        precondition(
+            rowLock == nil && other.rowLock == nil,
+            """
+            a row lock cannot be combined: Postgres refuses FOR UPDATE and FOR \
+            SHARE on UNION, INTERSECT and EXCEPT, and on their branches. Lock \
+            the rows in a separate statement inside the same transaction.
+            """)
+
         var next = Query<Model, Model>()
+        // The branches have already chosen their rows, including which
+        // soft-deleted ones. Applying the entity's default scope again on the
+        // outside is double-filtering, and it is wrong in every direction:
+        // `onlyDeleted().union(onlyDeleted())` selected `deleted_at IS NOT
+        // NULL` twice and then asked for `IS NULL`, which is empty; and
+        // `withDeleted().union(…)` quietly excluded what it had just asked
+        // for. `.included` here means "add no condition" — the derived source
+        // already contains exactly what the branches selected.
+        //
+        // Scoping the *combination* still works: `.onlyDeleted()` on the
+        // result applies to the combined rows, which is what it reads as.
+        next.deletedRows = .included
         next.ctes = ctes + other.ctes
         next.fromDerived = { writer in
             // Rendered with the outer writer, in text order, so the two

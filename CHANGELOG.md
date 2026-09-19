@@ -4,6 +4,54 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-19
+
+The rest of the 0.7.0/0.8.0 audit. One behaviour change worth reading before
+upgrading: `scalar` no longer adds `LIMIT 1`.
+
+### Changed
+
+- **`scalar` keeps the cardinality error.** It used to impose `LIMIT 1`, which
+  turned "the author's name" into "an author's name" — a missing uniqueness
+  assumption kept working until two rows matched. Postgres answers a subquery
+  returning two rows with "more than one row returned by a subquery used as an
+  expression", and that error is the assumption announcing itself.
+  ``scalarFirst`` is the explicit opt-in when several matches are expected and
+  any one will do.
+
+### Fixed
+
+- **A combination no longer re-applies the entity's soft-delete scope.** Each
+  branch already chose its rows, so filtering again outside was double
+  filtering: `onlyDeleted().union(onlyDeleted())` selected `deleted_at IS NOT
+  NULL` in both branches and then asked for `IS NULL`, which is empty, and
+  `withDeleted().union(…)` quietly excluded what it had just asked for.
+  Scoping the combination itself still works and now means what it reads as.
+
+- **Two different CTEs under one name are refused.** Declaring the same value
+  twice is one declaration, as before. Two different definitions sharing a
+  name used to keep the first silently, leaving a query that referred to
+  `popular` while containing `recent` — valid SQL, wrong answer. A `CommonTable`
+  carries an identity now, and a conflict fails at the call.
+
+- **A recursive step that cannot render says so.** The failure was swallowed
+  into an empty string, so `anchor UNION ALL ` reached Postgres and the error
+  came back as a syntax complaint about the wrong thing. The reason travels
+  into the statement now.
+
+- **A row lock cannot be combined.** Postgres refuses `FOR UPDATE` on a set
+  operation and on its branches; `a.lockForUpdate().union(b)` was spellable
+  and failed at the server.
+
+- **A negative frame offset is refused at the call**, where the literal was
+  written, rather than by Postgres on the request that runs it.
+
+### Documentation
+
+- The README's install snippet pointed at 0.6.0.
+- `Window.swift`'s header said a window in `WHERE`/`HAVING` reaches the server
+  rather than the compiler. That stopped being true in 0.7.0.
+
 ## [0.8.1] - 2026-09-19
 
 Two data-correctness fixes in set operations. **Anyone on 0.7.0 or 0.8.0 using

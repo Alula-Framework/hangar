@@ -90,7 +90,8 @@ extension Repo {
                     "sql": .string(entry.sql),
                     "count": .stringConvertible(entry.count),
                     "hint": .string(
-                        "the same statement ran \(entry.count) times in one unit of work — a preload or a join usually replaces this"),
+                        "the same statement ran \(entry.count) times in one unit of work — a preload or a join usually replaces this"
+                    ),
                 ])
         }
         return result

@@ -25,12 +25,31 @@ extension Query where Result == Model {
     /// ```
     ///
     /// Optional because a subquery matching no row is SQL NULL, and because a
-    /// type that claimed otherwise would be wrong on the first orphan. A
-    /// `LIMIT 1` is imposed: more than one row is a runtime error in Postgres
-    /// ("more than one row returned by a subquery used as an expression"), and
-    /// the limit is the difference between "the author's name" and a query
-    /// that works until two rows match.
+    /// type that claimed otherwise would be wrong on the first orphan.
+    ///
+    /// No `LIMIT` is imposed, deliberately. Postgres answers a subquery that
+    /// matched two rows with "more than one row returned by a subquery used as
+    /// an expression", and that error is usually a uniqueness assumption
+    /// announcing that it does not hold. Taking the first row silently would
+    /// turn "the author's name" into "an author's name" and keep working until
+    /// the day two rows matched. Use ``scalarFirst(_:)`` when any match will
+    /// do.
     public func scalar<V>(
+        _ build: (Model.QueryColumns) -> some Selectable<V>
+    ) -> SelectExpression<V?> {
+        SelectExpression<V?>(
+            expression: scalarExpression(
+                rendering: build(Model.queryColumns)._selectFragment.expression,
+                limitToOne: false))
+    }
+
+    /// The first matching value — `… LIMIT 1` — when several are expected and
+    /// any one will do.
+    ///
+    /// The explicit counterpart to ``scalar(_:)``, which leaves the cardinality
+    /// error in place. Pair this with an ordering, or "first" means "whichever
+    /// row the plan reached first".
+    public func scalarFirst<V>(
         _ build: (Model.QueryColumns) -> some Selectable<V>
     ) -> SelectExpression<V?> {
         SelectExpression<V?>(

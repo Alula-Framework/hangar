@@ -101,7 +101,8 @@ public struct TableSchema: Sendable {
     /// aliased fetches are join-shaped and not the per-row hot path.
     func qualifiedSelectList(as alias: String) -> String {
         let quoted = SQLRenderer.quote(alias)
-        return columns
+        return
+            columns
             .map { "\(quoted).\($0.quotedName)" }
             .joined(separator: ", ")
     }
@@ -119,7 +120,8 @@ public struct TableSchema: Sendable {
         let quotedName = SQLRenderer.quote(name)
         self.quotedName = quotedName
         self.selectList = columns.map(\.quotedName).joined(separator: ", ")
-        self.qualifiedSelectList = columns
+        self.qualifiedSelectList =
+            columns
             .map { "\(quotedName).\($0.quotedName)" }
             .joined(separator: ", ")
         self.insertList = insertable.map(\.quotedName).joined(separator: ", ")
