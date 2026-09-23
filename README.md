@@ -27,7 +27,7 @@ let popular = try await repo.all(
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Flight-Framework/hangar", from: "0.8.1")
+    .package(url: "https://github.com/Alula-Framework/hangar", from: "0.8.1")
 ]
 ```
 
@@ -663,7 +663,7 @@ integration suites skip without a database, and a skipped suite is not a
 passing one — what this package proves against real infrastructure is most of
 what it is for.
 
-`FLIGHT_KEEP_SERVERS=1` leaves the containers up between runs.
+`ALULA_KEEP_SERVERS=1` leaves the containers up between runs.
 
 ## License
 

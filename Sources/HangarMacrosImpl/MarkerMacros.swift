@@ -5,7 +5,7 @@ import SwiftSyntaxMacros
 /// `@Entity`'s expansion, which reads these attributes off the properties.
 /// Their own expansions are empty; their job is validating the attachment
 /// site so misuse fails on the property, not somewhere inside the enclosing
-/// type's expansion — the same pattern as Flight's `@Inject`.
+/// type's expansion — the same pattern as Alula's `@Inject`.
 
 public struct IDMacro: PeerMacro {
     public static func expansion(

@@ -37,7 +37,7 @@ public struct SelectExpression<Value>: Sendable, Selectable {
 // MARK: - Aggregates
 //
 // Return types are chosen so decoding never hits the NUMERIC problem the
-// flight-data-postgres spike catalogued (S3): Postgres widens integer
+// alula-data-postgres spike catalogued (S3): Postgres widens integer
 // sum/avg to NUMERIC, which PostgresNIO won't decode as Int/Double — so
 // integer sums render as `(sum(x))::bigint` and averages as
 // `(avg(x))::float8`. Aggregates over zero rows are SQL NULL, hence the

@@ -101,7 +101,7 @@ extension Repo {
     ///
     /// A `Repo` carries an optional logger, and both reports above used to be
     /// `logger?.warning(...)` — so a repo constructed without one discarded
-    /// them. That is every repo `flight-data`'s `withRepo` builds, which is
+    /// them. That is every repo `alula-data`'s `withRepo` builds, which is
     /// the idiom its own documentation recommends: an application could set
     /// `diagnostics = .recommended`, run thirty copies of one statement
     /// inside `detectingRepeatedQueries`, and get silence.

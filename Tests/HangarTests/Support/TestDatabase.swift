@@ -9,7 +9,7 @@ import Testing
 ///
 /// `.serialized` on the parent applies recursively, so suites that share
 /// the fixture tables never truncate them under each other — same pattern
-/// as flight-data-postgres's `PostgresIntegrationSuite`.
+/// as alula-data-postgres's `PostgresIntegrationSuite`.
 ///
 /// `.enabled(if:)` is here for the same reason: a suite trait applies to
 /// everything nested inside it, so nesting is all a new integration suite

@@ -8,7 +8,7 @@ import CompilerPluginSupport
 let package = Package(
     name: "hangar",
     platforms: [
-        // Matches the Flight family floor (Mutex/Synchronization on Darwin).
+        // Matches the Alula family floor (Mutex/Synchronization on Darwin).
         // Linux with a Swift 6.2 toolchain is unaffected by this stanza.
         .macOS(.v15)
     ],
@@ -25,16 +25,16 @@ let package = Package(
     ],
     dependencies: [
         // The design's dependency list (header): PostgresNIO, swift-log,
-        // swift-metrics, swift-syntax. Nothing from Flight.
+        // swift-metrics, swift-syntax. Nothing from Alula.
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.21.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         // Phase 5 gave the metrics facade its call sites (query duration
         // timers in Repo.execute), so the no-facade-deps-without-callers
         // policy is satisfied now.
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.5.0"),
-        // Changeset/ValidatedChanges/TableModel — the Flight-independent
+        // Changeset/ValidatedChanges/TableModel — the Alula-independent
         // validation + dirty-tracking layer. Extracted from
-        // flight-data-core precisely so Hangar could consume it.
+        // alula-data-core precisely so Hangar could consume it.
         // Pinned to 0.1.x explicitly: SwiftPM's `from:` means "up to next
         // major" even for a 0.x version, so `from: "0.1.0"` silently picked
         // up 0.2.0 the moment it was published — a breaking release
@@ -42,7 +42,7 @@ let package = Package(
         // every fresh CI checkout because this repo has no committed
         // Package.resolved to hold a version back. Bump this deliberately,
         // together with the source changes 0.2.0's new API needs.
-        .package(url: "https://github.com/Flight-Framework/swift-changeset.git", .upToNextMinor(from: "0.2.0")),
+        .package(url: "https://github.com/Alula-Framework/swift-changeset.git", .upToNextMinor(from: "0.2.0")),
         // swift-syntax bumps its major with each Swift release; the open
         // range is the community convention for macro packages.
         .package(url: "https://github.com/swiftlang/swift-syntax.git", "601.0.0"..<"999.0.0"),

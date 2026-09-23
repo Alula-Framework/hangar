@@ -6,7 +6,7 @@ import PostgresNIO
 /// Execution against PostgresNIO. `Repo` takes a connection
 /// source and nothing else — it has no idea what a request, a job, or a
 /// scope is; that's the caller's business, which is what keeps Hangar
-/// Flight-independent.
+/// Alula-independent.
 public struct Repo: Sendable {
     /// Where statements run: the pooled client(s), or — inside
     /// `transaction { }` — the one connection the transaction owns, with
@@ -57,7 +57,7 @@ public struct Repo: Sendable {
     }
 
     /// A repo pinned to one specific connection — for integration layers
-    /// that manage connection lifetime themselves (e.g. Flight's
+    /// that manage connection lifetime themselves (e.g. Alula's
     /// request-scoped connections, the design). Every statement runs on
     /// this connection; `transaction { }` issues `BEGIN`/`COMMIT` on it
     /// (nesting becomes savepoints as usual), and there is no replica
@@ -673,7 +673,7 @@ public struct Repo: Sendable {
 extension Repo {
     /// Binds `Repo.current` for the duration of `body` — Hangar owns the
     /// task-local; whoever manages lifetime populates it (a standalone user
-    /// directly, Flight's adapter when opening a request scope).
+    /// directly, Alula's adapter when opening a request scope).
     public static func with<T>(
         _ repo: Repo,
         _ body: () async throws -> T

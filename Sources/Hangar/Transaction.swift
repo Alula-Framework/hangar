@@ -126,7 +126,7 @@ extension Repo {
         // pinned to a leased connection has the `.transaction` backend at
         // depth 0, so it is *not* inside a transaction, and yet the old
         // `guard case .client` sent it down the no-retry path and discarded
-        // `maxAttempts` in silence. That is the shape flight-data's
+        // `maxAttempts` in silence. That is the shape alula-data's
         // `withRepo` produces, and its own documentation recommends, so the
         // retry never fired for the idiom most callers use.
         guard !isInTransaction else {

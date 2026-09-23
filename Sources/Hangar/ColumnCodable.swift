@@ -67,7 +67,7 @@ where
 /// Encoding uses the `unknown` parameter type (OID 705) in text format, so
 /// the server infers the enum type from the expression's context — the same
 /// behavior libpq gives untyped text literals, and the dialect accommodation
-/// the flight-data-postgres spike proved out (SPIKE-FINDINGS S1): a
+/// the alula-data-postgres spike proved out (SPIKE-FINDINGS S1): a
 /// parameter *declared* TEXT is rejected for an enum-typed column, while an
 /// `unknown` one type-checks against anything with a text input function.
 public protocol PostgresEnum: RawRepresentable, ColumnCodable, DynamicFilterConvertible

@@ -84,10 +84,10 @@ jobs:
   # Its CI runs on its own pushes — the last was in August — while a committed
   # Package.resolved held hangar at 0.4.0 through 0.5.0 and 0.6.0. A change
   # here that breaks it would not surface until someone happened to push
-  # there. Same wiring flight uses for flight-data, and the same reason.
+  # there. Same wiring alula uses for alula-data, and the same reason.
   vapor:
     name: hangar-vapor builds against this commit
-    uses: Flight-Framework/hangar-vapor/.github/workflows/ci.yml@main
+    uses: Alula-Framework/hangar-vapor/.github/workflows/ci.yml@main
     with:
       hangar_ref: ${{ github.event.pull_request.head.sha || github.sha }}
     secrets: inherit

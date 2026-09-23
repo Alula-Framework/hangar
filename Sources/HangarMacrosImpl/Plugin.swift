@@ -17,7 +17,7 @@ struct HangarMacrosPlugin: CompilerPlugin {
     ]
 }
 
-/// Shared diagnostic shape (same convention as Flight Core ): every
+/// Shared diagnostic shape (same convention as Alula Core ): every
 /// diagnostic names the fix, not just the problem — these fire at build time
 /// and are the design's compile-time-first pitch in action.
 struct HangarMacroDiagnostic: DiagnosticMessage {

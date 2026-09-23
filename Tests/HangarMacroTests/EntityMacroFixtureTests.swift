@@ -23,7 +23,7 @@ import XCTest
 
 // MacroSpec so the harness knows the conformances @attached(extension)
 // declares — without it the extension macro receives an empty `protocols`
-// list and emits nothing (same first-run finding as Flight Core).
+// list and emits nothing (same first-run finding as Alula Core).
 private let testMacros: [String: MacroSpec] = [
     "Entity": MacroSpec(
         type: EntityMacro.self, conformances: ["Hangar.Table", "Changesets.TableModel"]),
