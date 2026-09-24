@@ -27,7 +27,7 @@ let popular = try await repo.all(
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Alula-Framework/hangar", from: "0.8.1")
+    .package(url: "https://github.com/Alula-Framework/hangar", from: "0.10.0")
 ]
 ```
 

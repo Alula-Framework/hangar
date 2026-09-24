@@ -4,7 +4,13 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-09-24
+
+A Postgres audit of Hangar against the bugs, pull requests and tests of
+Fluent, SQLKit/PostgresKit, PostgresNIO and the other Swift Postgres
+libraries. Every finding below was reproduced against Postgres 16 before it
+was fixed, and each fix ships with regression tests and, where the behavior
+has a shape, property or adversarial tests against the server.
 
 ### Fixed
 
