@@ -22,6 +22,10 @@ indirect enum SQLExpression: Sendable {
     /// `(lhs = ANY(rhs))` — the batched-preload membership test (design
     /// ): one bound array parameter, however many keys.
     case anyOf(SQLExpression, SQLExpression)
+    /// `(lhs IN ($1, $2, …))`, or `FALSE` for an empty list — one bind per
+    /// value, for values that cannot travel as a typed array (enum labels,
+    /// whose type only the server knows).
+    case inList(SQLExpression, [SQLExpression])
     /// `name(args...)` — aggregates and, later, arbitrary functions.
     case function(String, [SQLExpression])
     /// `expr OVER (PARTITION BY … ORDER BY …)`.
@@ -303,6 +307,28 @@ extension Column where Value: ColumnCodable & PostgresArrayEncodable {
     /// parameter, however many values.
     public func `in`(_ values: [Value]) -> Predicate {
         Predicate(expression: .anyOf(expression, .bind(SQLBind { try $0.append(values) })))
+    }
+}
+
+extension Column where Value: PostgresEnum {
+    /// Membership in a list of enum cases: `status IN ($1, $2)`.
+    ///
+    /// An enum cannot use the one-array `= ANY($1)` form other types do: the
+    /// array would need the Postgres enum's own array type, which Swift does
+    /// not know, and a `text[]` compares as `status = text`, which Postgres
+    /// rejects. Each label is bound on its own instead, typed by the server
+    /// from the column as a single enum value is — so the predicate can use an
+    /// index on the column. An enum has few cases, so the list stays short.
+    public func `in`(_ values: [Value]) -> Predicate {
+        Predicate(expression: .inList(expression, values.map { .bind(SQLBind($0)) }))
+    }
+}
+
+extension Column {
+    /// Membership in a list of enum cases, for an optional enum column. A
+    /// NULL never matches.
+    public func `in`<E: PostgresEnum>(_ values: [E]) -> Predicate where Value == E? {
+        Predicate(expression: .inList(expression, values.map { .bind(SQLBind($0)) }))
     }
 }
 

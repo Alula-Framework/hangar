@@ -623,6 +623,12 @@ enum SQLRenderer {
             return "(\(render(lhs, writer: &writer)) \(op) \(render(rhs, writer: &writer)))"
         case .anyOf(let lhs, let rhs):
             return "(\(render(lhs, writer: &writer)) = ANY(\(render(rhs, writer: &writer))))"
+        case .inList(let lhs, let values):
+            // `IN ()` is a syntax error; an empty list matches nothing.
+            guard !values.isEmpty else { return "FALSE" }
+            let column = render(lhs, writer: &writer)
+            let list = values.map { render($0, writer: &writer) }.joined(separator: ", ")
+            return "(\(column) IN (\(list)))"
         case .function(let name, let arguments):
             let rendered = arguments.map { render($0, writer: &writer) }.joined(separator: ", ")
             return "\(name)(\(rendered))"

@@ -66,6 +66,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   onConflict:)` returns the rows written, in input order, chunked like
   `insert(models)`.
 - **Column-to-column `<`, `>`, `<=`, `>=`.**
+- **`status.in([...])` on enum columns.** It did not compile: enums are not
+  array-encodable, and `= ANY(text[])` is rejected against an enum. It
+  renders `status IN ($1, $2)`, each label typed by the server from the
+  column (so an index still applies); an empty list is `FALSE`.
+- **`NullableArray<T>`** for arrays with NULL elements (`{1,NULL,3}`), which
+  PostgresNIO refuses to decode — one NULL made the row unreadable.
+- **`EnumArray<E>`** for arrays of a Postgres enum (`role[]`), which had no
+  mapping at all. Labels are written quoted, so one spelled `NULL` or holding
+  a comma, brace or quote cannot change the array's shape.
 - **`SKIP LOCKED`, `NOWAIT`, `FOR NO KEY UPDATE`, `FOR KEY SHARE`.**
   `lockForUpdate(wait: .skipLocked)` is the job-queue claim;
   `lock(.noKeyUpdate)` locks a row for a non-key change without blocking
