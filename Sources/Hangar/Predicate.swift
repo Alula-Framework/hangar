@@ -384,7 +384,7 @@ extension Query {
 ///
 /// Reach for it whenever part of a pattern comes from a user. Without it a
 /// search box is a pattern language: `50%` finds `500`, `a_c` finds `abc`, and
-/// a lone `%` matches every row. ``Column/contains(_:caseInsensitive:)`` and
+/// a lone `%` matches every row. `contains(_:caseInsensitive:)` and
 /// its siblings apply it for you.
 ///
 /// Backslash is Postgres's default `LIKE` escape, independent of
@@ -406,13 +406,13 @@ private func patternMatch(_ column: SQLExpression, _ pattern: String, caseInsens
 extension Column where Value == String {
     /// `column LIKE pattern` — `%` and `_` are wildcards, and so is any `%` or
     /// `_` inside text you interpolate. For user input use
-    /// ``contains(_:caseInsensitive:)``, or escape it with ``likeEscaped(_:)``.
+    /// `contains(_:caseInsensitive:)`, or escape it with ``likeEscaped(_:)``.
     public func like(_ pattern: String) -> Predicate {
         patternMatch(expression, pattern, caseInsensitive: false)
     }
 
     /// Postgres-only case-insensitive LIKE. The same caution about wildcards
-    /// in interpolated text applies as for ``like(_:)``.
+    /// in interpolated text applies as for `like(_:)`.
     public func ilike(_ pattern: String) -> Predicate {
         patternMatch(expression, pattern, caseInsensitive: true)
     }

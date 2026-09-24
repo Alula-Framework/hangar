@@ -4,7 +4,7 @@ Nesting, savepoints, and the one thing you must tell a connection-bound repo.
 
 ## Overview
 
-``Repo/transaction(isolation:_:)`` runs a body inside a transaction. Returning commits;
+``Repo/transaction(isolation:statementTimeout:_:)`` runs a body inside a transaction. Returning commits;
 throwing rolls back:
 
 ```swift
