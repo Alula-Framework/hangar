@@ -383,10 +383,56 @@ extension Query {
 
 // MARK: - Row locking
 
+/// How strong a row lock a locking read takes — Postgres's four levels,
+/// strongest first.
+public enum RowLockStrength: Sendable {
+    /// `FOR UPDATE`: blocks every other lock on the row, including the
+    /// foreign-key checks of inserts that reference it.
+    case update
+    /// `FOR NO KEY UPDATE`: what an `UPDATE` that leaves the key alone takes.
+    /// Still exclusive among writers, but lets rows referencing this one be
+    /// inserted concurrently — the right lock for "read, then change a
+    /// non-key column".
+    case noKeyUpdate
+    /// `FOR SHARE`: blocks writers, admits other share-lockers.
+    case share
+    /// `FOR KEY SHARE`: blocks only changes to the key and deletes.
+    case keyShare
+}
+
+/// What a locking read does when a row is already locked by someone else.
+public enum RowLockWait: Sendable {
+    /// Wait for the lock (up to `lock_timeout`, if the session sets one).
+    case wait
+    /// `NOWAIT`: fail at once with ``DatabaseError/Kind/lockNotAvailable``.
+    case noWait
+    /// `SKIP LOCKED`: leave locked rows out of the result — the job-queue
+    /// pattern, where concurrent workers each claim rows nobody else holds.
+    case skipLocked
+}
+
 /// The row-locking clause of a locking read.
-enum RowLock: String, Sendable {
-    case update = "FOR UPDATE"
-    case share = "FOR SHARE"
+struct RowLock: Sendable, Equatable {
+    var strength: RowLockStrength
+    var wait: RowLockWait
+
+    static let update = RowLock(strength: .update, wait: .wait)
+    static let share = RowLock(strength: .share, wait: .wait)
+
+    var sql: String {
+        let base =
+            switch strength {
+            case .update: "FOR UPDATE"
+            case .noKeyUpdate: "FOR NO KEY UPDATE"
+            case .share: "FOR SHARE"
+            case .keyShare: "FOR KEY SHARE"
+            }
+        switch wait {
+        case .wait: return base
+        case .noWait: return base + " NOWAIT"
+        case .skipLocked: return base + " SKIP LOCKED"
+        }
+    }
 }
 
 extension Query {
@@ -403,17 +449,30 @@ extension Query {
     /// A locking read is a write in intent, so it always runs on the
     /// primary, never a read replica — and it only *means* anything inside
     /// a transaction, since the lock ends when the transaction does.
-    public func lockForUpdate() -> Query<Model, Result> {
-        var next = self
-        next.rowLock = .update
-        return next
+    ///
+    /// `wait` chooses what happens at a row someone else holds: wait (the
+    /// default), fail at once (`.noWait`), or skip it (`.skipLocked`) — the
+    /// last is how a job queue lets workers claim rows without colliding:
+    ///
+    /// ```swift
+    /// let jobs = try await tx.all(
+    ///     Job.where { $0.state == .ready }.order { $0.id.asc() }.limit(10)
+    ///         .lockForUpdate(wait: .skipLocked))
+    /// ```
+    public func lockForUpdate(wait: RowLockWait = .wait) -> Query<Model, Result> {
+        lock(.update, wait: wait)
     }
 
     /// `SELECT ... FOR SHARE`: blocks concurrent writers of the matched
     /// rows but admits other share-locking readers.
-    public func lockForShare() -> Query<Model, Result> {
+    public func lockForShare(wait: RowLockWait = .wait) -> Query<Model, Result> {
+        lock(.share, wait: wait)
+    }
+
+    /// A locking read at any of Postgres's four strengths.
+    public func lock(_ strength: RowLockStrength, wait: RowLockWait = .wait) -> Query<Model, Result> {
         var next = self
-        next.rowLock = .share
+        next.rowLock = RowLock(strength: strength, wait: wait)
         return next
     }
 }

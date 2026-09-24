@@ -57,12 +57,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   search for `50%` no longer finds `500` and a lone `%` no longer matches
   every row. `likeEscaped(_:)` does the escaping for hand-built patterns. The
   README's search example used `ilike("%\(term)%")` and now uses `contains`.
+- **Upsert names conflicts every way Postgres does.** A constraint
+  (`.doNothing(constraint:)`, `.doUpdate(constraint:set:)`), a partial
+  unique index (`target:where:` — without the index predicate Postgres finds
+  no arbiter and fails with 42P10), and a conditional `DO UPDATE`
+  (`updateWhere: { existing, incoming in existing.version < incoming.version }`,
+  where `incoming` is `EXCLUDED`). **Bulk upsert:** `repo.insert(models,
+  onConflict:)` returns the rows written, in input order, chunked like
+  `insert(models)`.
+- **Column-to-column `<`, `>`, `<=`, `>=`.**
+- **`SKIP LOCKED`, `NOWAIT`, `FOR NO KEY UPDATE`, `FOR KEY SHARE`.**
+  `lockForUpdate(wait: .skipLocked)` is the job-queue claim;
+  `lock(.noKeyUpdate)` locks a row for a non-key change without blocking
+  inserts that reference it. `lockForUpdate()`/`lockForShare()` are
+  unchanged.
 - **`isDistinct(from:)` / `isNotDistinct(from:)`** on optional columns render
   `IS [NOT] DISTINCT FROM` — Swift's answer for NULL. `!=` keeps SQL's
   (NULL rows are not returned, consistent with `!(==)`), now documented.
 
 ### Changed
 
+- **`ON CONFLICT` clauses Postgres would reject are refused before
+  sending**: a `DO UPDATE` with no target (which sql-kit still renders) or
+  nothing to set, and an empty constraint name, throw
+  `HangarError.invalidConflictClause`.
 - **Breaking: server errors are `DatabaseError`, not `PSQLError`.** Code that
   caught `PSQLError` and read `serverInfo[.sqlState]` should catch
   `DatabaseError` and read `kind` or `sqlState`. Errors that never reached

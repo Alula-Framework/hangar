@@ -119,6 +119,10 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// Hangar should fail one request, not the process.
     case unknownColumn(table: String, column: String)
 
+    /// An `ON CONFLICT` clause Postgres would reject — a `DO UPDATE` with no
+    /// target or nothing to set, or an index predicate without columns.
+    case invalidConflictClause(table: String, reason: String)
+
     /// Every message names the fix, not just the problem — someone is
     /// usually reading it during an incident.
     public var description: String {
@@ -193,6 +197,8 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
         case .unknownColumn(let table, let column):
             return
                 "Internal error: entity \"\(table)\" has no binding for column \"\(column)\". This is a Hangar bug."
+        case .invalidConflictClause(let table, let reason):
+            return "ON CONFLICT on \"\(table)\": \(reason)."
         }
     }
 }

@@ -273,6 +273,29 @@ public func != <V: ColumnCodable & Equatable>(lhs: Column<V>, rhs: Column<V?>) -
     Predicate(expression: .infix("<>", lhs.expression, rhs.expression))
 }
 
+// Ordering between columns — "is the incoming version newer", a range join,
+// `updated_at > created_at`.
+
+/// `lhs < rhs`, column to column.
+public func < <V: ColumnCodable & Comparable>(lhs: Column<V>, rhs: Column<V>) -> Predicate {
+    Predicate(expression: .infix("<", lhs.expression, rhs.expression))
+}
+
+/// `lhs > rhs`, column to column.
+public func > <V: ColumnCodable & Comparable>(lhs: Column<V>, rhs: Column<V>) -> Predicate {
+    Predicate(expression: .infix(">", lhs.expression, rhs.expression))
+}
+
+/// `lhs <= rhs`, column to column.
+public func <= <V: ColumnCodable & Comparable>(lhs: Column<V>, rhs: Column<V>) -> Predicate {
+    Predicate(expression: .infix("<=", lhs.expression, rhs.expression))
+}
+
+/// `lhs >= rhs`, column to column.
+public func >= <V: ColumnCodable & Comparable>(lhs: Column<V>, rhs: Column<V>) -> Predicate {
+    Predicate(expression: .infix(">=", lhs.expression, rhs.expression))
+}
+
 // MARK: - Membership
 
 extension Column where Value: ColumnCodable & PostgresArrayEncodable {

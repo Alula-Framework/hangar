@@ -349,10 +349,32 @@ public struct Repo: Sendable {
     /// nothing.
     @discardableResult
     public func insert<M: Table>(_ models: [M]) async throws -> [M] {
+        try await insert(models, conflict: nil)
+    }
+
+    /// Inserts every model, resolving conflicts as `onConflict` says, and
+    /// returns the rows the statement wrote: inserted rows, and rows a
+    /// `DO UPDATE` updated. A row skipped by `DO NOTHING` — or by a
+    /// `DO UPDATE` whose `updateWhere` rejects it — returns nothing, so the
+    /// result can be shorter than `models`; it keeps input order.
+    ///
+    /// Postgres refuses a statement whose rows conflict with *each other*
+    /// under `DO UPDATE` (SQLSTATE 21000, "cannot affect row a second
+    /// time"): deduplicate the input first.
+    @discardableResult
+    public func insert<M: Table>(_ models: [M], onConflict: OnConflict<M>) async throws -> [M] {
+        try await insert(models, conflict: onConflict)
+    }
+
+    private func insert<M: Table>(_ models: [M], conflict: OnConflict<M>?) async throws -> [M] {
         guard !models.isEmpty else { return [] }
-        let perStatement = Self.rowsPerInsert(columns: M.schema.insertable.count)
+        // The conflict clause's own binds (index and update predicates) ride
+        // in every chunk, so they come off each chunk's budget.
+        var probe = BindWriter()
+        let reserved = try conflict.map { _ = try SQLRenderer.conflictClause($0, writer: &probe); return probe.binds.count } ?? 0
+        let perStatement = Self.rowsPerInsert(columns: M.schema.insertable.count, reserving: reserved)
         guard models.count > perStatement else {
-            return try await insertBatch(models)
+            return try await insertBatch(models, conflict: conflict)
         }
         // More values than one statement can carry. Postgres's protocol counts
         // parameters in a 16-bit field, so a statement binds at most 65,535;
@@ -365,17 +387,17 @@ public struct Repo: Sendable {
             var start = models.startIndex
             while start < models.endIndex {
                 let end = min(start + perStatement, models.endIndex)
-                stored += try await tx.insertBatch(Array(models[start..<end]))
+                stored += try await tx.insertBatch(Array(models[start..<end]), conflict: conflict)
                 start = end
             }
             return stored
         }
     }
 
-    private func insertBatch<M: Table>(_ models: [M]) async throws -> [M] {
+    private func insertBatch<M: Table>(_ models: [M], conflict: OnConflict<M>?) async throws -> [M] {
         let returned: [M] = try await rows(
-            for: SQLRenderer.insert(models), intent: .write, operation: "insert")
-        guard returned.count == models.count else {
+            for: SQLRenderer.insert(models, onConflict: conflict), intent: .write, operation: "insert")
+        guard conflict != nil || returned.count == models.count else {
             // A rule or trigger swallowed part of the write.
             throw HangarError.staleModel(table: M.schema.name)
         }
@@ -388,8 +410,8 @@ public struct Repo: Sendable {
 
     /// Rows per multi-row `INSERT` so that `rows × columns` stays within
     /// ``maximumBindParameters``.
-    static func rowsPerInsert(columns: Int) -> Int {
-        max(1, maximumBindParameters / max(1, columns))
+    static func rowsPerInsert(columns: Int, reserving reserved: Int = 0) -> Int {
+        max(1, (maximumBindParameters - reserved) / max(1, columns))
     }
 
     /// Writes every non-key column of the model's row, identified by primary

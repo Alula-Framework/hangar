@@ -418,7 +418,7 @@ extension SQLRenderer {
         }
         if let limit = query.rowLimit { sql += " LIMIT \(limit)" }
         if let offset = query.rowOffset { sql += " OFFSET \(offset)" }
-        if let lock = query.rowLock { sql += " \(lock.rawValue)" }
+        if let lock = query.rowLock { sql += " \(lock.sql)" }
         return sql
     }
 

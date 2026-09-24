@@ -253,19 +253,24 @@ public final class QueryBuilder<Base: Table> {
         return self
     }
 
-    /// `SELECT ... FOR UPDATE`.
+    /// `SELECT ... FOR UPDATE`, waiting, failing, or skipping at rows
+    /// someone else holds — see ``Query/lockForUpdate(wait:)``.
     @discardableResult
-    public func lockForUpdate() -> QueryBuilder<Base> {
-        checkNotConsumed("lockForUpdate")
-        rowLock = .update
-        return self
+    public func lockForUpdate(wait: RowLockWait = .wait) -> QueryBuilder<Base> {
+        lock(.update, wait: wait)
     }
 
     /// `SELECT ... FOR SHARE`.
     @discardableResult
-    public func lockForShare() -> QueryBuilder<Base> {
-        checkNotConsumed("lockForShare")
-        rowLock = .share
+    public func lockForShare(wait: RowLockWait = .wait) -> QueryBuilder<Base> {
+        lock(.share, wait: wait)
+    }
+
+    /// A locking read at any of Postgres's four strengths.
+    @discardableResult
+    public func lock(_ strength: RowLockStrength, wait: RowLockWait = .wait) -> QueryBuilder<Base> {
+        checkNotConsumed("lock")
+        rowLock = RowLock(strength: strength, wait: wait)
         return self
     }
 
@@ -564,7 +569,7 @@ extension SQLRenderer {
         }
         if let limit = query.rowLimit { sql += " LIMIT \(limit)" }
         if let offset = query.rowOffset { sql += " OFFSET \(offset)" }
-        if let lock = query.rowLock { sql += " \(lock.rawValue)" }
+        if let lock = query.rowLock { sql += " \(lock.sql)" }
         return sql
     }
 

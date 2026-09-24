@@ -97,7 +97,7 @@ enum SQLRenderer {
         // LIMIT/OFFSET are validated Ints; rendered literally.
         if let limit = query.rowLimit { sql += " LIMIT \(limit)" }
         if let offset = query.rowOffset { sql += " OFFSET \(offset)" }
-        if let lock = query.rowLock { sql += " \(lock.rawValue)" }
+        if let lock = query.rowLock { sql += " \(lock.sql)" }
         return sql
     }
 
@@ -234,31 +234,34 @@ enum SQLRenderer {
 
     /// `INSERT INTO t (cols) VALUES (...), (...), ... RETURNING cols` —
     /// every model in one statement, one round trip.
-    static func insert<M: Table>(_ models: [M]) throws -> RenderedStatement {
+    static func insert<M: Table>(_ models: [M], onConflict: OnConflict<M>? = nil) throws -> RenderedStatement {
         let schema = M.schema
         let columns = schema.insertable
-        // Every column is database-generated. `DEFAULT VALUES` inserts one
-        // row, so name one generated column and give each row its default.
-        if columns.isEmpty, let first = schema.columns.first {
-            let rows = Array(repeating: "(DEFAULT)", count: models.count).joined(separator: ", ")
-            return RenderedStatement(
-                sql: "INSERT INTO \(schema.quotedName) (\(first.quotedName)) VALUES \(rows) RETURNING \(schema.selectList)",
-                binds: [])
-        }
         var writer = BindWriter()
-        let rows =
-            try models
-            .map { model in
-                let placeholders =
-                    try columns
-                    .map { writer.placeholder(try bind(model, $0.name, in: schema)) }
-                    .joined(separator: ", ")
-                return "(\(placeholders))"
-            }
-            .joined(separator: ", ")
+        let rows: String
+        let list: String
+        if columns.isEmpty, let first = schema.columns.first {
+            // Every column is database-generated. `DEFAULT VALUES` inserts one
+            // row, so name one generated column and give each row its default.
+            list = first.quotedName
+            rows = Array(repeating: "(DEFAULT)", count: models.count).joined(separator: ", ")
+        } else {
+            list = schema.insertList
+            rows =
+                try models
+                .map { model in
+                    let placeholders =
+                        try columns
+                        .map { writer.placeholder(try bind(model, $0.name, in: schema)) }
+                        .joined(separator: ", ")
+                    return "(\(placeholders))"
+                }
+                .joined(separator: ", ")
+        }
+        let conflict = try onConflict.map { " \(try conflictClause($0, writer: &writer))" } ?? ""
         let sql = """
-            INSERT INTO \(schema.quotedName) (\(schema.insertList)) \
-            VALUES \(rows) RETURNING \(schema.selectList)
+            INSERT INTO \(schema.quotedName) (\(list)) \
+            VALUES \(rows)\(conflict) RETURNING \(schema.selectList)
             """
         return RenderedStatement(sql: sql, binds: writer.binds)
     }
@@ -296,16 +299,16 @@ enum SQLRenderer {
     ) throws -> RenderedStatement {
         let schema = M.schema
         try checkKnown(validated.changedFields.keys, in: schema)
-        let conflict = try onConflict.map { " \(try conflictClause($0))" } ?? ""
+        var writer = BindWriter()
         let columns = schema.columns.filter { validated.changedFields[$0.name] != nil }
         guard !columns.isEmpty else {
             // Nothing changed: every column falls to its database default.
+            let conflict = try onConflict.map { " \(try conflictClause($0, writer: &writer))" } ?? ""
             return RenderedStatement(
                 sql:
                     "INSERT INTO \(schema.quotedName) DEFAULT VALUES\(conflict) RETURNING \(schema.selectList)",
-                binds: [])
+                binds: writer.binds)
         }
-        var writer = BindWriter()
         let placeholders =
             try columns
             .map {
@@ -315,6 +318,7 @@ enum SQLRenderer {
                 )
             }
             .joined(separator: ", ")
+        let conflict = try onConflict.map { " \(try conflictClause($0, writer: &writer))" } ?? ""
         let sql = """
             INSERT INTO \(schema.quotedName) (\(columnList(columns))) \
             VALUES (\(placeholders))\(conflict) RETURNING \(schema.selectList)
@@ -494,7 +498,7 @@ enum SQLRenderer {
             unsupported = "DISTINCT ON"
         } else if let lock = query.rowLock {
             // DELETE and UPDATE already take their own row locks.
-            unsupported = lock.rawValue
+            unsupported = lock.sql
         } else if query.fromDerived != nil {
             // A set operation is a *source*, and DELETE/UPDATE target a table.
             // Rendered anyway, the derived source is simply dropped and the

@@ -588,7 +588,7 @@ extension SQLRenderer {
         if let offset = query.rowOffset { sql += " OFFSET \(offset)" }
         // Postgres itself rejects the invalid combinations loudly (FOR
         // UPDATE on the nullable side of an outer join, with GROUP BY...).
-        if let lock = query.rowLock { sql += " \(lock.rawValue)" }
+        if let lock = query.rowLock { sql += " \(lock.sql)" }
         return sql
     }
 
