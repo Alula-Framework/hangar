@@ -51,6 +51,9 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         /// SQLSTATE 57014: `statement_timeout` expired or the query was
         /// cancelled.
         case queryCanceled
+        /// SQLSTATE 22003: a number too large (or small) for its type — an
+        /// integer sum past `bigint`, a value past `smallint`.
+        case numericValueOutOfRange
         /// SQLSTATE 25P02: an earlier statement in this transaction failed,
         /// so Postgres ignores everything until the transaction ends.
         case transactionAborted
@@ -131,6 +134,7 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         case "40P01": .deadlock
         case "55P03": .lockNotAvailable
         case "57014": .queryCanceled
+        case "22003": .numericValueOutOfRange
         case "25P02": .transactionAborted
         default: .other
         }
@@ -147,6 +151,7 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         case .deadlock: "deadlock"
         case .lockNotAvailable: "lock not available"
         case .queryCanceled: "query canceled"
+        case .numericValueOutOfRange: "numeric value out of range"
         case .transactionAborted: "transaction aborted"
         case .other: "database error"
         }

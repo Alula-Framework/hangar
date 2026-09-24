@@ -34,6 +34,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **An entity whose every column is database-generated can be inserted.**
   It rendered `INSERT INTO t () VALUES ()`; it renders `DEFAULT VALUES`
   (or `VALUES (DEFAULT), …` in bulk).
+- **A cancelled transaction no longer commits.** PostgresNIO does not stop
+  a running statement, so a body could finish after its task was cancelled
+  — typically when the request it served went away — and its `COMMIT` made
+  the abandoned work durable. The outermost level now checks for
+  cancellation before committing and rolls back with `CancellationError`.
+  Found by the new cancellation test.
 - **Failure logs no longer contain row data.** The error-level "statement
   failed" line included the server's `DETAIL`, which for unique and
   foreign-key violations quotes the row (`Key (email)=(ada@…)`). It now
@@ -90,6 +96,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them (it mapped the first two to `Date` and skipped the others), `date[]`
   to `[CalendarDate]`, and enum arrays to `EnumArray`, declaring each enum
   once.
+- **`transaction(statementTimeout:)`**: a server-enforced bound on every
+  statement in the transaction (`SET LOCAL statement_timeout`), failing with
+  `DatabaseError.Kind.queryCanceled`. The only way to bound a query:
+  cancelling the task does not stop it.
+- **`sum`/`avg` on `numeric` columns** (exact, as `Decimal`) **and on nullable
+  columns**, which had none. `DatabaseError.Kind.numericValueOutOfRange`
+  (22003) names the error an integer sum past `bigint` raises.
 - **`isDistinct(from:)` / `isNotDistinct(from:)`** on optional columns render
   `IS [NOT] DISTINCT FROM` — Swift's answer for NULL. `!=` keeps SQL's
   (NULL rows are not returned, consistent with `!(==)`), now documented.

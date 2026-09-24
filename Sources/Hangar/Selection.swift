@@ -42,6 +42,10 @@ public struct SelectExpression<Value>: Sendable, Selectable {
 // integer sums render as `(sum(x))::bigint` and averages as
 // `(avg(x))::float8`. Aggregates over zero rows are SQL NULL, hence the
 // optionals; `count` alone is total.
+//
+// An integer sum too large for `bigint` fails with SQLSTATE 22003
+// (`DatabaseError.Kind.numericValueOutOfRange`) rather than wrapping: the
+// answer does not fit in `Int` either, and a wrong total is worse than none.
 
 extension Column {
     /// `count(column)` — how many rows have a non-NULL value here. Total
@@ -74,6 +78,56 @@ extension Column where Value: BinaryFloatingPoint {
     /// `avg(column)` for floating-point columns. NULL over zero rows.
     public func avg() -> SelectExpression<Double?> {
         SelectExpression(expression: .cast(.function("avg", [expression]), "float8"))
+    }
+}
+
+extension Column where Value == Decimal {
+    /// `sum(column)` for `numeric` columns — exact: numeric in, `Decimal`
+    /// out, no floating-point step. NULL over zero rows.
+    public func sum() -> SelectExpression<Decimal?> {
+        SelectExpression(expression: .function("sum", [expression]))
+    }
+
+    /// `avg(column)` for `numeric` columns, as `Decimal` — Postgres computes
+    /// it in numeric, to about twenty significant digits. NULL over zero rows.
+    public func avg() -> SelectExpression<Decimal?> {
+        SelectExpression(expression: .function("avg", [expression]))
+    }
+}
+
+// Nullable columns aggregate the same way; NULLs are skipped, as SQL does.
+
+extension Column {
+    /// `sum(column)` for a nullable integer column. NULLs are skipped; NULL
+    /// when no row has a value.
+    public func sum<W: BinaryInteger>() -> SelectExpression<Int?> where Value == W? {
+        SelectExpression(expression: .cast(.function("sum", [expression]), "bigint"))
+    }
+
+    /// `avg(column)` for a nullable integer column, over the rows that have a
+    /// value.
+    public func avg<W: BinaryInteger>() -> SelectExpression<Double?> where Value == W? {
+        SelectExpression(expression: .cast(.function("avg", [expression]), "float8"))
+    }
+
+    /// `sum(column)` for a nullable floating-point column.
+    public func sum<W: BinaryFloatingPoint>() -> SelectExpression<Double?> where Value == W? {
+        SelectExpression(expression: .cast(.function("sum", [expression]), "float8"))
+    }
+
+    /// `avg(column)` for a nullable floating-point column.
+    public func avg<W: BinaryFloatingPoint>() -> SelectExpression<Double?> where Value == W? {
+        SelectExpression(expression: .cast(.function("avg", [expression]), "float8"))
+    }
+
+    /// `sum(column)` for a nullable `numeric` column, exact.
+    public func sum() -> SelectExpression<Decimal?> where Value == Decimal? {
+        SelectExpression(expression: .function("sum", [expression]))
+    }
+
+    /// `avg(column)` for a nullable `numeric` column, as `Decimal`.
+    public func avg() -> SelectExpression<Decimal?> where Value == Decimal? {
+        SelectExpression(expression: .function("avg", [expression]))
     }
 }
 

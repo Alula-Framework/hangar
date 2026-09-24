@@ -37,10 +37,20 @@ extension Repo {
     ///     (`BEGIN ISOLATION LEVEL SERIALIZABLE`); ignored on nested calls,
     ///     because Postgres ties isolation to the whole transaction and a
     ///     savepoint cannot change it.
+    ///   - statementTimeout: the longest any one statement in the
+    ///     transaction may run, enforced by the server (`SET LOCAL
+    ///     statement_timeout`); a statement past it fails with
+    ///     ``DatabaseError/Kind/queryCanceled``. This is the way to bound a
+    ///     query: cancelling the calling task does **not** stop it —
+    ///     PostgresNIO sends no cancel request, so the server finishes the
+    ///     statement and only then does the task see `CancellationError`.
+    ///     Applied at the outermost level; ignored on nested calls, since a
+    ///     setting made inside a savepoint outlives its `RELEASE`.
     ///   - body: the transactional work, handed a `Repo` bound to the
     ///     transaction's connection.
     public func transaction<T: Sendable>(
         isolation: IsolationLevel? = nil,
+        statementTimeout: Duration? = nil,
         _ body: (Repo) async throws -> T
     ) async throws -> T {
         switch backend {
@@ -52,12 +62,13 @@ extension Repo {
             // *called* inside the lease closure, never passed across it —
             // region isolation rejects the round trip.
             return try await primary.withConnection { connection in
-                let control = TransactionControl(depth: 0, isolation: isolation)
+                let control = TransactionControl(depth: 0, isolation: isolation, statementTimeout: statementTimeout)
                 let log = logger ?? Self.quietLogger
                 let ledger = TransactionLedger()
                 try await control.run(\.begin, on: connection, logger: log)
                 let tx = Repo(transaction: connection, depth: 1, ledger: ledger, logger: logger)
                 do {
+                    try await control.applySettings(on: connection, logger: log)
                     let result = try await body(tx)
                     try await control.finish(on: connection, ledger: ledger, logger: log)
                     return result
@@ -72,7 +83,7 @@ extension Repo {
                 }
             }
         case .transaction(let connection, let depth):
-            let control = TransactionControl(depth: depth, isolation: isolation)
+            let control = TransactionControl(depth: depth, isolation: isolation, statementTimeout: statementTimeout)
             let log = logger ?? Self.quietLogger
             let ledger = transactionLedger ?? TransactionLedger()
             do {
@@ -84,6 +95,7 @@ extension Repo {
             }
             let tx = Repo(transaction: connection, depth: depth + 1, ledger: ledger, logger: logger)
             do {
+                try await control.applySettings(on: connection, logger: log)
                 let result = try await body(tx)
                 try await control.finish(on: connection, ledger: ledger, logger: log)
                 return result
@@ -128,6 +140,7 @@ extension Repo {
     /// outermost owner can run it again.
     public func transaction<T: Sendable>(
         isolation: IsolationLevel? = nil,
+        statementTimeout: Duration? = nil,
         retryingOnSerializationFailure maxAttempts: Int,
         _ body: (Repo) async throws -> T
     ) async throws -> T {
@@ -141,12 +154,12 @@ extension Repo {
         // `withRepo` produces, and its own documentation recommends, so the
         // retry never fired for the idiom most callers use.
         guard !isInTransaction else {
-            return try await transaction(isolation: isolation, body)
+            return try await transaction(isolation: isolation, statementTimeout: statementTimeout, body)
         }
         var attempt = 1
         while true {
             do {
-                return try await transaction(isolation: isolation, body)
+                return try await transaction(isolation: isolation, statementTimeout: statementTimeout, body)
             } catch let error as DatabaseError where attempt < maxAttempts && error.isRetryable {
                 // Wait a jittered moment rather than looping straight back in.
                 //
@@ -191,9 +204,21 @@ struct TransactionControl {
     let begin: PostgresQuery
     let commit: PostgresQuery
     let rollback: PostgresQuery
+    /// `SET LOCAL …` statements run right after `BEGIN`.
+    let settings: [PostgresQuery]
 
-    init(depth: Int, isolation: IsolationLevel? = nil) {
+    init(depth: Int, isolation: IsolationLevel? = nil, statementTimeout: Duration? = nil) {
         self.depth = depth
+        // Outermost only, like isolation: a SET LOCAL inside a savepoint
+        // survives its RELEASE and would leak into the enclosing work. The
+        // value is an integer Hangar renders, never user text.
+        if depth == 0, let statementTimeout {
+            let (seconds, attoseconds) = statementTimeout.components
+            let milliseconds = max(1, seconds * 1_000 + attoseconds / 1_000_000_000_000_000)
+            settings = [PostgresQuery(unsafeSQL: "SET LOCAL statement_timeout = \(milliseconds)")]
+        } else {
+            settings = []
+        }
         if depth == 0 {
             // The level's SQL text comes from a closed enum, never from
             // user input — same rule as the savepoint names below.
@@ -206,6 +231,16 @@ struct TransactionControl {
             begin = PostgresQuery(unsafeSQL: "SAVEPOINT \(name)")
             commit = PostgresQuery(unsafeSQL: "RELEASE SAVEPOINT \(name)")
             rollback = PostgresQuery(unsafeSQL: "ROLLBACK TO SAVEPOINT \(name)")
+        }
+    }
+
+    func applySettings(on connection: PostgresConnection, logger: Logger) async throws {
+        for setting in settings {
+            do {
+                _ = try await connection.query(setting, logger: logger)
+            } catch {
+                throw translatingDatabaseErrors(error)
+            }
         }
     }
 
@@ -235,8 +270,16 @@ struct TransactionControl {
     /// A savepoint has the same hazard with a louder symptom: `RELEASE` in
     /// an aborted transaction fails with SQLSTATE 25P02. That is mapped to
     /// the same error, so both levels say the same true thing.
+    ///
+    /// **A cancelled task does not commit.** Cancellation is cooperative, and
+    /// PostgresNIO does not stop a running statement, so a body can run to
+    /// its end after its task was cancelled — typically because the request
+    /// it served went away. Committing that work would make durable what the
+    /// caller abandoned; the outermost level checks first and throws
+    /// `CancellationError`, which rolls the transaction back.
     func finish(on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger) async throws {
         if depth == 0 {
+            try Task.checkCancellation()
             let result: PostgresQueryResult
             do {
                 result = try await connection.query(commit, logger: logger).get()
