@@ -57,7 +57,10 @@ public struct EntityGenerator: Sendable {
 
         let conformances = options.conformances.isEmpty
             ? "" : ": " + options.conformances.joined(separator: ", ")
-        lines.append("@Entity(\"\(table.name)\")")
+        // Outside `public` the schema is named, so the model reads the table
+        // it was generated from whatever the connection's search_path is.
+        let schemaArgument = table.schema == "public" ? "" : ", schema: \"\(table.schema)\""
+        lines.append("@Entity(\"\(table.name)\"\(schemaArgument))")
         lines.append("\(access)struct \(typeName)\(conformances) {")
 
         for column in table.columns {

@@ -162,7 +162,7 @@ public final class QueryBuilder<Base: Table> {
         let onPredicate = condition(columns).predicate
         joins.append(
             ComposedJoin(
-                kind: kind, quotedTableName: T.schema.quotedName, alias: alias,
+                kind: kind, quotedTableName: T.schema.quotedSource, alias: alias,
                 onExpression: onPredicate.expression, deletedAt: T.schema.deletedAt))
         return columns
     }
@@ -518,7 +518,7 @@ extension SQLRenderer {
     static func fromClause<Base: Table, R>(
         _ query: ComposedQuery<Base, R>, writer: inout BindWriter
     ) -> String {
-        var sql = "FROM \(Base.schema.quotedName) AS \(quote(query.baseAlias))"
+        var sql = "FROM \(Base.schema.quotedSource) AS \(quote(query.baseAlias))"
         for join in query.joins {
             sql += " \(join.kind.rawValue) \(join.quotedTableName) AS \(quote(join.alias))"
             let on = join.effectiveOnExpression(under: query.deletedRows)

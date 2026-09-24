@@ -28,7 +28,12 @@
 /// Declares a struct as a table-backed entity: generates the typed
 /// column set, schema metadata, row decoder, changeset metadata, and
 /// association registry — the whole `Table` conformance.
-public macro Entity(_ tableName: String) =
+///
+/// A table outside the connection's `search_path` names its schema:
+/// `@Entity("invoices", schema: "billing")` reads `FROM "billing"."invoices"`.
+/// A dot inside the table name is not a separator — `"billing.invoices"` is a
+/// legal, different, table name in Postgres.
+public macro Entity(_ tableName: String, schema: String? = nil) =
     #externalMacro(module: "HangarMacrosImpl", type: "EntityMacro")
 
 /// Marks the primary key (composite keys: multiple `@ID` properties).

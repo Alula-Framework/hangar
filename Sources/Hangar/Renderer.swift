@@ -206,7 +206,7 @@ enum SQLRenderer {
         let wasQualified = writer.qualified
         writer.qualified = true
         defer { writer.qualified = wasQualified }
-        var sql = "SELECT 1 FROM \(M.schema.quotedName)"
+        var sql = "SELECT 1 FROM \(M.schema.quotedSource)"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         return sql
     }
@@ -217,7 +217,7 @@ enum SQLRenderer {
         // Every column is database-generated: `()` would be a syntax error.
         guard !columns.isEmpty else {
             return RenderedStatement(
-                sql: "INSERT INTO \(schema.quotedName) DEFAULT VALUES RETURNING \(schema.selectList)",
+                sql: "INSERT INTO \(schema.quotedSource) DEFAULT VALUES RETURNING \(schema.selectList)",
                 binds: [])
         }
         var writer = BindWriter()
@@ -226,7 +226,7 @@ enum SQLRenderer {
             .map { writer.placeholder(try bind(model, $0.name, in: schema)) }
             .joined(separator: ", ")
         let sql = """
-            INSERT INTO \(schema.quotedName) (\(schema.insertList)) \
+            INSERT INTO \(schema.quotedSource) (\(schema.insertList)) \
             VALUES (\(placeholders)) RETURNING \(schema.selectList)
             """
         return RenderedStatement(sql: sql, binds: writer.binds)
@@ -260,7 +260,7 @@ enum SQLRenderer {
         }
         let conflict = try onConflict.map { " \(try conflictClause($0, writer: &writer))" } ?? ""
         let sql = """
-            INSERT INTO \(schema.quotedName) (\(list)) \
+            INSERT INTO \(schema.quotedSource) (\(list)) \
             VALUES \(rows)\(conflict) RETURNING \(schema.selectList)
             """
         return RenderedStatement(sql: sql, binds: writer.binds)
@@ -280,7 +280,7 @@ enum SQLRenderer {
             }
             .joined(separator: ", ")
         let sql = """
-            UPDATE \(schema.quotedName) SET \(assignments) \
+            UPDATE \(schema.quotedSource) SET \(assignments) \
             WHERE \(try primaryKeyClause(model, schema: schema, writer: &writer)) \
             RETURNING \(schema.selectList)
             """
@@ -306,7 +306,7 @@ enum SQLRenderer {
             let conflict = try onConflict.map { " \(try conflictClause($0, writer: &writer))" } ?? ""
             return RenderedStatement(
                 sql:
-                    "INSERT INTO \(schema.quotedName) DEFAULT VALUES\(conflict) RETURNING \(schema.selectList)",
+                    "INSERT INTO \(schema.quotedSource) DEFAULT VALUES\(conflict) RETURNING \(schema.selectList)",
                 binds: writer.binds)
         }
         let placeholders =
@@ -320,7 +320,7 @@ enum SQLRenderer {
             .joined(separator: ", ")
         let conflict = try onConflict.map { " \(try conflictClause($0, writer: &writer))" } ?? ""
         let sql = """
-            INSERT INTO \(schema.quotedName) (\(columnList(columns))) \
+            INSERT INTO \(schema.quotedSource) (\(columnList(columns))) \
             VALUES (\(placeholders))\(conflict) RETURNING \(schema.selectList)
             """
         return RenderedStatement(sql: sql, binds: writer.binds)
@@ -355,7 +355,7 @@ enum SQLRenderer {
             }
             .joined(separator: " AND ")
         let sql = """
-            UPDATE \(schema.quotedName) SET \(assignments) \
+            UPDATE \(schema.quotedSource) SET \(assignments) \
             WHERE \(conditions) \
             RETURNING \(schema.selectList)
             """
@@ -394,7 +394,7 @@ enum SQLRenderer {
         var writer = BindWriter()
         let stamp = writer.placeholder(SQLBind(instant))
         let sql = """
-            UPDATE \(schema.quotedName) SET \(column.quotedName) = \(stamp) \
+            UPDATE \(schema.quotedSource) SET \(column.quotedName) = \(stamp) \
             WHERE \(try primaryKeyClause(model, schema: schema, writer: &writer)) \
             AND \(column.quotedName) IS NULL \
             RETURNING \(schema.primaryKey[0].quotedName)
@@ -410,7 +410,7 @@ enum SQLRenderer {
         }
         var writer = BindWriter()
         let sql = """
-            UPDATE \(schema.quotedName) SET \(column.quotedName) = NULL \
+            UPDATE \(schema.quotedSource) SET \(column.quotedName) = NULL \
             WHERE \(try primaryKeyClause(model, schema: schema, writer: &writer)) \
             AND \(column.quotedName) IS NOT NULL \
             RETURNING \(schema.primaryKey[0].quotedName)
@@ -424,7 +424,7 @@ enum SQLRenderer {
         // RETURNING the key so the Repo can distinguish "deleted" from
         // "no such row" without a command tag.
         let sql = """
-            DELETE FROM \(schema.quotedName) \
+            DELETE FROM \(schema.quotedSource) \
             WHERE \(try primaryKeyClause(model, schema: schema, writer: &writer)) \
             RETURNING \(schema.primaryKey[0].quotedName)
             """
@@ -444,7 +444,7 @@ enum SQLRenderer {
         try checkBulkWritable(query, operation: "delete")
         var writer = BindWriter()
         var sql = withClause(query.ctes, writer: &writer)
-        sql += "DELETE FROM \(M.schema.quotedName)"
+        sql += "DELETE FROM \(M.schema.quotedSource)"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         sql += " RETURNING \(M.schema.primaryKey[0].quotedName)"
         return RenderedStatement(sql: sql, binds: writer.binds)
@@ -470,7 +470,7 @@ enum SQLRenderer {
             assignments
             .map { "\(quote($0.name)) = \(render($0.expression, writer: &writer))" }
             .joined(separator: ", ")
-        var sql = "\(prefix)UPDATE \(M.schema.quotedName) SET \(sets)"
+        var sql = "\(prefix)UPDATE \(M.schema.quotedSource) SET \(sets)"
         appendWhere(query.effectivePredicate, to: &sql, writer: &writer)
         sql += " RETURNING \(M.schema.primaryKey[0].quotedName)"
         return RenderedStatement(sql: sql, binds: writer.binds)
@@ -563,7 +563,7 @@ enum SQLRenderer {
     /// to the entity's table name so every column qualification downstream
     /// still resolves.
     static func source<M: Table>(_ type: M.Type, cte: String?) -> String {
-        guard let cte else { return M.schema.quotedName }
+        guard let cte else { return M.schema.quotedSource }
         return "\(quote(cte)) AS \(M.schema.quotedName)"
     }
 

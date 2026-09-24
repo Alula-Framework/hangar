@@ -67,8 +67,13 @@ extension Table {
 /// single query. (Benchmarks: filtering and re-quoting per query cost more
 /// than the rest of rendering put together.)
 public struct TableSchema: Sendable {
-    /// The table's name, unquoted.
+    /// The table's name, unquoted and unqualified — also the name columns
+    /// are qualified with, which is how Postgres refers to a table read from
+    /// another schema.
     public let name: String
+    /// The Postgres schema the table lives in, or nil for the connection's
+    /// `search_path` (normally `public`).
+    public let schemaName: String?
     /// All columns, in declaration order — also the order every SELECT and
     /// RETURNING list is rendered in, and the order the decoder consumes.
     public let columns: [ColumnDefinition]
@@ -85,8 +90,12 @@ public struct TableSchema: Sendable {
     /// Columns included in UPDATE... SET (insertable minus the key).
     public let updatable: [ColumnDefinition]
 
-    /// `"table"` — the quoted table name.
+    /// `"table"` — the quoted table name: the reference name for aliases and
+    /// column qualification.
     let quotedName: String
+    /// `"schema"."table"`, or `"table"` — what FROM, JOIN, INSERT, UPDATE and
+    /// DELETE name.
+    let quotedSource: String
     /// `"a", "b", "c"` — every column, the SELECT and RETURNING list.
     let selectList: String
     /// `"table"."a", "table"."b"` — the same list qualified, for joins.
@@ -109,8 +118,9 @@ public struct TableSchema: Sendable {
 
     /// Builds the schema and precomputes every derived list — called by
     /// `@Entity`'s expansion, once per type.
-    public init(name: String, columns: [ColumnDefinition]) {
+    public init(name: String, schema: String? = nil, columns: [ColumnDefinition]) {
         self.name = name
+        self.schemaName = schema
         self.columns = columns
         self.primaryKey = columns.filter(\.isPrimaryKey)
         self.deletedAt = columns.first(where: \.isDeletedAt)
@@ -119,6 +129,7 @@ public struct TableSchema: Sendable {
 
         let quotedName = SQLRenderer.quote(name)
         self.quotedName = quotedName
+        self.quotedSource = schema.map { "\(SQLRenderer.quote($0)).\(quotedName)" } ?? quotedName
         self.selectList = columns.map(\.quotedName).joined(separator: ", ")
         self.qualifiedSelectList =
             columns

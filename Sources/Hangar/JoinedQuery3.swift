@@ -362,12 +362,12 @@ extension SQLRenderer {
                     "the three joined tables must expose distinct names — alias the repeated one: \(A.schema.name).alias(\"a\") ... .join(\(C.schema.name).alias(\"c\"), on: ...)."
             )
         }
-        var sql = "FROM \(A.schema.quotedName)"
+        var sql = "FROM \(A.schema.quotedSource)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }
-        sql += " \(query.kind1.rawValue) \(B.schema.quotedName)"
+        sql += " \(query.kind1.rawValue) \(B.schema.quotedSource)"
         if let alias = query.joinedAlias { sql += " AS \(quote(alias))" }
         sql += " ON \(render(query.effectiveOn1.expression, writer: &writer))"
-        sql += " \(query.kind2.rawValue) \(C.schema.quotedName)"
+        sql += " \(query.kind2.rawValue) \(C.schema.quotedSource)"
         if let alias = query.thirdAlias { sql += " AS \(quote(alias))" }
         sql += " ON \(render(query.effectiveOn2.expression, writer: &writer))"
         return sql

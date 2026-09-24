@@ -371,6 +371,20 @@ func staticStringArgument(of attribute: AttributeSyntax) -> String? {
     return segment.content.text
 }
 
+/// The static string passed as `label:`, `.some(nil)` when the argument is
+/// absent, and nil when it is present but not a plain literal.
+func labeledStringArgument(of attribute: AttributeSyntax, label: String) -> String?? {
+    guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
+        let argument = arguments.first(where: { $0.label?.text == label })
+    else { return .some(nil) }
+    if argument.expression.is(NilLiteralExprSyntax.self) { return .some(nil) }
+    guard let literal = argument.expression.as(StringLiteralExprSyntax.self),
+        literal.segments.count == 1,
+        case .stringSegment(let segment) = literal.segments.first
+    else { return nil }
+    return .some(segment.content.text)
+}
+
 /// Default camelCase → snake_case column naming:
 /// `viewCount` → `view_count`, `authorID` → `author_id`, `url` → `url`.
 func snakeCase(_ name: String) -> String {

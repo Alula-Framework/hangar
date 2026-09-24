@@ -96,6 +96,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them (it mapped the first two to `Date` and skipped the others), `date[]`
   to `[CalendarDate]`, and enum arrays to `EnumArray`, declaring each enum
   once.
+- **Tables in another schema: `@Entity("invoices", schema: "billing")`.**
+  `@Entity("billing.invoices")` quoted the whole string as one identifier —
+  a legal, different table — so a table outside the `search_path` could not
+  be mapped. Statements now read and write `"billing"."invoices"`, while
+  columns qualify by the bare table name, as Postgres resolves them.
+  `hangar-introspect` passes the schema for tables outside `public`.
 - **`transaction(statementTimeout:)`**: a server-enforced bound on every
   statement in the transaction (`SET LOCAL statement_timeout`), failing with
   `DatabaseError.Kind.queryCanceled`. The only way to bound a query:

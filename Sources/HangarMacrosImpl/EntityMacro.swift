@@ -33,6 +33,13 @@ public struct EntityMacro: MemberMacro, ExtensionMacro {
                 at: node)
             return []
         }
+        guard let schemaName = labeledStringArgument(of: node, label: "schema") else {
+            context.diagnoseError(
+                "entity.schema",
+                "@Entity's schema must be a static string literal: @Entity(\"invoices\", schema: \"billing\").",
+                at: node)
+            return []
+        }
         guard let members = parseEntityMembers(of: structDecl, in: context) else {
             return []
         }
@@ -66,7 +73,7 @@ public struct EntityMacro: MemberMacro, ExtensionMacro {
         var declarations: [DeclSyntax] = [
             columnsStruct(properties, tableName: tableName, access: access),
             "\(raw: access)static let queryColumns = Columns()",
-            schemaDeclaration(properties, tableName: tableName, access: access),
+            schemaDeclaration(properties, tableName: tableName, schemaName: schemaName, access: access),
             "\(raw: access)static let tableName = \(literal: tableName)",
             tableModelColumns(properties, typeName: typeName, access: access),
             memberwiseInit(members, access: access),
@@ -131,7 +138,7 @@ public struct EntityMacro: MemberMacro, ExtensionMacro {
     }
 
     private static func schemaDeclaration(
-        _ properties: [EntityProperty], tableName: String, access: String
+        _ properties: [EntityProperty], tableName: String, schemaName: String?, access: String
     ) -> DeclSyntax {
         let definitions = properties
             .map {
@@ -140,7 +147,7 @@ public struct EntityMacro: MemberMacro, ExtensionMacro {
             .joined(separator: "\n")
         return """
             \(raw: access)static let schema = Hangar.TableSchema(
-                name: "\(raw: tableName)",
+                name: "\(raw: tableName)",\(raw: schemaName.map { "\n    schema: \"\($0)\"," } ?? "")
                 columns: [
             \(raw: definitions)
                 ]

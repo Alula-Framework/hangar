@@ -525,9 +525,9 @@ extension SQLRenderer {
                     : "both sides of this join are named \"\(effectiveA)\" — give them distinct aliases."
             )
         }
-        var sql = "FROM \(A.schema.quotedName)"
+        var sql = "FROM \(A.schema.quotedSource)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }
-        sql += " \(query.kind.rawValue) \(query.joinedSource.map(quote) ?? B.schema.quotedName)"
+        sql += " \(query.kind.rawValue) \(query.joinedSource.map(quote) ?? B.schema.quotedSource)"
         if query.joinedSource == nil, let alias = query.joinedAlias {
             sql += " AS \(quote(alias))"
         }
