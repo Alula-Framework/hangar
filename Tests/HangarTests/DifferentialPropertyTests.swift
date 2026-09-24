@@ -34,6 +34,8 @@ extension PostgresIntegrationSuite {
             case published(Bool)
             case nicknameIsNull
             case nicknameIs(String)
+            case nicknameIsDistinct(String)
+            case nicknameIsNotDistinct(String)
             case titleIs(String)
             case not(Condition)
             case and(Condition, Condition)
@@ -45,6 +47,8 @@ extension PostgresIntegrationSuite {
             case published(Bool)
             case nicknameIsNull
             case nicknameIs(String)
+            case nicknameIsDistinct(String)
+            case nicknameIsNotDistinct(String)
             case titleIs(String)
             case not
             case and
@@ -68,6 +72,16 @@ extension PostgresIntegrationSuite {
                     .map { Step.nicknameIs($0 ?? "alice") }.eraseToAny()
             ),
             (
+                1,
+                Gen.element(of: ["alice", "bob", "carol"])
+                    .map { Step.nicknameIsDistinct($0 ?? "alice") }.eraseToAny()
+            ),
+            (
+                1,
+                Gen.element(of: ["alice", "bob", "carol"])
+                    .map { Step.nicknameIsNotDistinct($0 ?? "alice") }.eraseToAny()
+            ),
+            (
                 2,
                 Gen.element(of: ["first", "second", "third"])
                     .map { Step.titleIs($0 ?? "first") }.eraseToAny()
@@ -85,6 +99,8 @@ extension PostgresIntegrationSuite {
                 case .published(let flag): stack.append(.published(flag))
                 case .nicknameIsNull: stack.append(.nicknameIsNull)
                 case .nicknameIs(let name): stack.append(.nicknameIs(name))
+                case .nicknameIsDistinct(let name): stack.append(.nicknameIsDistinct(name))
+                case .nicknameIsNotDistinct(let name): stack.append(.nicknameIsNotDistinct(name))
                 case .titleIs(let title): stack.append(.titleIs(title))
                 case .not: if let top = stack.popLast() { stack.append(.not(top)) }
                 case .and:
@@ -109,6 +125,8 @@ extension PostgresIntegrationSuite {
             case .published(let flag): return columns.published == flag
             case .nicknameIsNull: return columns.nickname == nil
             case .nicknameIs(let name): return columns.nickname == name
+            case .nicknameIsDistinct(let name): return columns.nickname.isDistinct(from: name)
+            case .nicknameIsNotDistinct(let name): return columns.nickname.isNotDistinct(from: name)
             case .titleIs(let title): return columns.title == title
             case .not(let inner): return !predicate(inner, columns)
             case .and(let left, let right):
@@ -127,6 +145,9 @@ extension PostgresIntegrationSuite {
             case .nicknameIs(let name):
                 guard let nickname = post.nickname else { return nil }  // UNKNOWN
                 return nickname == name
+            // Two-valued by definition: never UNKNOWN, and nil is a value.
+            case .nicknameIsDistinct(let name): return post.nickname != name
+            case .nicknameIsNotDistinct(let name): return post.nickname == name
             case .titleIs(let title): return post.title == title
             case .not(let inner):
                 guard let value = evaluate(inner, post) else { return nil }

@@ -134,9 +134,33 @@ public func == <V: ColumnCodable & Equatable>(lhs: Column<V?>, rhs: V?) -> Predi
 }
 
 /// `column <> value` for an optional column; `!= nil` renders `IS NOT NULL`.
+///
+/// **SQL's answer, not Swift's.** Against a non-nil value this is `<>`, and
+/// `NULL <> 'x'` is unknown, so rows where the column is NULL are *not*
+/// returned — although `nil != "x"` is `true` in Swift. That is the same
+/// three-valued logic `!(column == value)` follows, and Hangar keeps the two
+/// consistent. To include the NULL rows, ask for it:
+/// ``Column/isDistinct(from:)`` renders `IS DISTINCT FROM`.
 public func != <V: ColumnCodable & Equatable>(lhs: Column<V?>, rhs: V?) -> Predicate {
     guard let rhs else { return Predicate(expression: .isNotNull(lhs.expression)) }
     return Predicate(expression: .infix("<>", lhs.expression, .bind(SQLBind(rhs))))
+}
+
+extension Column {
+    /// `column IS DISTINCT FROM value` — inequality with Swift's answer for
+    /// NULL: a NULL column *is* distinct from a value, so those rows are
+    /// returned, where `!=` would drop them.
+    public func isDistinct<V: ColumnCodable & Equatable>(from value: V?) -> Predicate where Value == V? {
+        guard let value else { return Predicate(expression: .isNotNull(expression)) }
+        return Predicate(expression: .infix("IS DISTINCT FROM", expression, .bind(SQLBind(value))))
+    }
+
+    /// `column IS NOT DISTINCT FROM value` — equality where NULL equals NULL
+    /// and never equals a value: never unknown, so `!` of it is exact.
+    public func isNotDistinct<V: ColumnCodable & Equatable>(from value: V?) -> Predicate where Value == V? {
+        guard let value else { return Predicate(expression: .isNull(expression)) }
+        return Predicate(expression: .infix("IS NOT DISTINCT FROM", expression, .bind(SQLBind(value))))
+    }
 }
 
 /// `column < value`.
@@ -306,27 +330,86 @@ extension Query {
 
 // MARK: - Pattern matching
 
+/// Escapes text for use inside a `LIKE`/`ILIKE` pattern, so it matches
+/// itself: `%`, `_` and the escape character `\` each gain a backslash.
+///
+/// Reach for it whenever part of a pattern comes from a user. Without it a
+/// search box is a pattern language: `50%` finds `500`, `a_c` finds `abc`, and
+/// a lone `%` matches every row. ``Column/contains(_:caseInsensitive:)`` and
+/// its siblings apply it for you.
+///
+/// Backslash is Postgres's default `LIKE` escape, independent of
+/// `standard_conforming_strings`, so no `ESCAPE` clause is needed.
+public func likeEscaped(_ text: String) -> String {
+    var escaped = ""
+    escaped.reserveCapacity(text.count)
+    for character in text {
+        if character == "\\" || character == "%" || character == "_" { escaped.append("\\") }
+        escaped.append(character)
+    }
+    return escaped
+}
+
+private func patternMatch(_ column: SQLExpression, _ pattern: String, caseInsensitive: Bool) -> Predicate {
+    Predicate(expression: .infix(caseInsensitive ? "ILIKE" : "LIKE", column, .bind(SQLBind(pattern))))
+}
+
 extension Column where Value == String {
-    /// `column LIKE pattern` — `%` and `_` are the wildcards.
+    /// `column LIKE pattern` — `%` and `_` are wildcards, and so is any `%` or
+    /// `_` inside text you interpolate. For user input use
+    /// ``contains(_:caseInsensitive:)``, or escape it with ``likeEscaped(_:)``.
     public func like(_ pattern: String) -> Predicate {
-        Predicate(expression: .infix("LIKE", expression, .bind(SQLBind(pattern))))
+        patternMatch(expression, pattern, caseInsensitive: false)
     }
 
-    /// Postgres-only case-insensitive LIKE — first-class
+    /// Postgres-only case-insensitive LIKE. The same caution about wildcards
+    /// in interpolated text applies as for ``like(_:)``.
     public func ilike(_ pattern: String) -> Predicate {
-        Predicate(expression: .infix("ILIKE", expression, .bind(SQLBind(pattern))))
+        patternMatch(expression, pattern, caseInsensitive: true)
+    }
+
+    /// Rows whose value contains `text` literally — wildcards in it match
+    /// only themselves. The safe way to put a search term in a pattern.
+    public func contains(_ text: String, caseInsensitive: Bool = false) -> Predicate {
+        patternMatch(expression, "%\(likeEscaped(text))%", caseInsensitive: caseInsensitive)
+    }
+
+    /// Rows whose value starts with `text`, literally. A left-anchored
+    /// `LIKE` can use a `text_pattern_ops` index.
+    public func hasPrefix(_ text: String, caseInsensitive: Bool = false) -> Predicate {
+        patternMatch(expression, "\(likeEscaped(text))%", caseInsensitive: caseInsensitive)
+    }
+
+    /// Rows whose value ends with `text`, literally.
+    public func hasSuffix(_ text: String, caseInsensitive: Bool = false) -> Predicate {
+        patternMatch(expression, "%\(likeEscaped(text))", caseInsensitive: caseInsensitive)
     }
 }
 
 extension Column where Value == String? {
-    /// `column LIKE pattern` — `%` and `_` are the wildcards.
+    /// `column LIKE pattern` — `%` and `_` are wildcards. NULL never matches.
     public func like(_ pattern: String) -> Predicate {
-        Predicate(expression: .infix("LIKE", expression, .bind(SQLBind(pattern))))
+        patternMatch(expression, pattern, caseInsensitive: false)
     }
 
     /// `column ILIKE pattern` — Postgres's case-insensitive LIKE.
     public func ilike(_ pattern: String) -> Predicate {
-        Predicate(expression: .infix("ILIKE", expression, .bind(SQLBind(pattern))))
+        patternMatch(expression, pattern, caseInsensitive: true)
+    }
+
+    /// Rows whose value contains `text` literally. NULL never matches.
+    public func contains(_ text: String, caseInsensitive: Bool = false) -> Predicate {
+        patternMatch(expression, "%\(likeEscaped(text))%", caseInsensitive: caseInsensitive)
+    }
+
+    /// Rows whose value starts with `text`, literally. NULL never matches.
+    public func hasPrefix(_ text: String, caseInsensitive: Bool = false) -> Predicate {
+        patternMatch(expression, "\(likeEscaped(text))%", caseInsensitive: caseInsensitive)
+    }
+
+    /// Rows whose value ends with `text`, literally. NULL never matches.
+    public func hasSuffix(_ text: String, caseInsensitive: Bool = false) -> Predicate {
+        patternMatch(expression, "%\(likeEscaped(text))", caseInsensitive: caseInsensitive)
     }
 }
 

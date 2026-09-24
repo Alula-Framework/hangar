@@ -214,6 +214,12 @@ enum SQLRenderer {
     static func insert<M: Table>(_ model: M) throws -> RenderedStatement {
         let schema = M.schema
         let columns = schema.insertable
+        // Every column is database-generated: `()` would be a syntax error.
+        guard !columns.isEmpty else {
+            return RenderedStatement(
+                sql: "INSERT INTO \(schema.quotedName) DEFAULT VALUES RETURNING \(schema.selectList)",
+                binds: [])
+        }
         var writer = BindWriter()
         let placeholders =
             try columns
@@ -231,6 +237,14 @@ enum SQLRenderer {
     static func insert<M: Table>(_ models: [M]) throws -> RenderedStatement {
         let schema = M.schema
         let columns = schema.insertable
+        // Every column is database-generated. `DEFAULT VALUES` inserts one
+        // row, so name one generated column and give each row its default.
+        if columns.isEmpty, let first = schema.columns.first {
+            let rows = Array(repeating: "(DEFAULT)", count: models.count).joined(separator: ", ")
+            return RenderedStatement(
+                sql: "INSERT INTO \(schema.quotedName) (\(first.quotedName)) VALUES \(rows) RETURNING \(schema.selectList)",
+                binds: [])
+        }
         var writer = BindWriter()
         let rows =
             try models

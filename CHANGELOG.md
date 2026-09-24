@@ -25,6 +25,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   synthesized decoder skipped it, letting `page=-5` through as a negative
   `OFFSET` and `perPage=100000` as a hundred-thousand-row page — and missing
   fields take their defaults.
+- **Batch inserts past 65,535 values work.** A multi-row insert binds
+  rows × columns parameters, and Postgres's protocol caps a statement at
+  65,535; `repo.insert(models)` failed with PostgresNIO's
+  `tooManyParameters` (printing the entire statement). It now inserts in
+  chunks that fit, inside a transaction — a savepoint when nested — so the
+  batch stays all-or-nothing and the rows still come back in input order.
+- **An entity whose every column is database-generated can be inserted.**
+  It rendered `INSERT INTO t () VALUES ()`; it renders `DEFAULT VALUES`
+  (or `VALUES (DEFAULT), …` in bulk).
 - **Failure logs no longer contain row data.** The error-level "statement
   failed" line included the server's `DETAIL`, which for unique and
   foreign-key violations quotes the row (`Key (email)=(ada@…)`). It now
@@ -43,6 +52,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   showed (`catch let error as DatabaseError where error.isUniqueViolation`),
   which did not exist.
 - `PageRequest.clamped(maximumPerPage:)` and `PageRequest.defaultMaximumPerPage`.
+- **`contains`, `hasPrefix`, `hasSuffix`** (with `caseInsensitive:`) on text
+  columns match a term literally: `%`, `_` and `\` in it are escaped, so a
+  search for `50%` no longer finds `500` and a lone `%` no longer matches
+  every row. `likeEscaped(_:)` does the escaping for hand-built patterns. The
+  README's search example used `ilike("%\(term)%")` and now uses `contains`.
+- **`isDistinct(from:)` / `isNotDistinct(from:)`** on optional columns render
+  `IS [NOT] DISTINCT FROM` — Swift's answer for NULL. `!=` keeps SQL's
+  (NULL rows are not returned, consistent with `!(==)`), now documented.
 
 ### Changed
 

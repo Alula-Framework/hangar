@@ -350,6 +350,29 @@ public struct Repo: Sendable {
     @discardableResult
     public func insert<M: Table>(_ models: [M]) async throws -> [M] {
         guard !models.isEmpty else { return [] }
+        let perStatement = Self.rowsPerInsert(columns: M.schema.insertable.count)
+        guard models.count > perStatement else {
+            return try await insertBatch(models)
+        }
+        // More values than one statement can carry. Postgres's protocol counts
+        // parameters in a 16-bit field, so a statement binds at most 65,535;
+        // past that PostgresNIO refuses before sending. The rows go in chunks
+        // that fit, inside one transaction — a savepoint when there already is
+        // one — so the batch stays all-or-nothing, as one statement was.
+        return try await transaction { tx in
+            var stored: [M] = []
+            stored.reserveCapacity(models.count)
+            var start = models.startIndex
+            while start < models.endIndex {
+                let end = min(start + perStatement, models.endIndex)
+                stored += try await tx.insertBatch(Array(models[start..<end]))
+                start = end
+            }
+            return stored
+        }
+    }
+
+    private func insertBatch<M: Table>(_ models: [M]) async throws -> [M] {
         let returned: [M] = try await rows(
             for: SQLRenderer.insert(models), intent: .write, operation: "insert")
         guard returned.count == models.count else {
@@ -357,6 +380,16 @@ public struct Repo: Sendable {
             throw HangarError.staleModel(table: M.schema.name)
         }
         return returned
+    }
+
+    /// The most bind parameters one statement may carry: the protocol's
+    /// parameter count is a 16-bit unsigned field.
+    static let maximumBindParameters = 65_535
+
+    /// Rows per multi-row `INSERT` so that `rows × columns` stays within
+    /// ``maximumBindParameters``.
+    static func rowsPerInsert(columns: Int) -> Int {
+        max(1, maximumBindParameters / max(1, columns))
     }
 
     /// Writes every non-key column of the model's row, identified by primary

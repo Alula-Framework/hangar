@@ -59,7 +59,7 @@ let q = filters.reduce(Post.all) { q, filter in
     switch filter {
     case .published:        q.where { $0.published }
     case .author(let id):   q.where { $0.authorID == id }
-    case .search(let term): q.where { $0.title.ilike("%\(term)%") }
+    case .search(let term): q.where { $0.title.contains(term, caseInsensitive: true) }
     }
 }
 ```
@@ -67,13 +67,18 @@ let q = filters.reduce(Post.all) { q, filter in
 ## What it does
 
 **Predicates** with real operators — `==`, `<`, `&&`, `||`, `!`, `in`,
-`like`, `ilike`:
+`like`, `ilike`, and `contains`/`hasPrefix`/`hasSuffix` for text that should
+match literally:
 
 ```swift
 Post.where { $0.published == true && $0.viewCount > 100 }
-Post.where { $0.title.ilike("%swift%") }
+Post.where { $0.title.contains(searchTerm, caseInsensitive: true) }  // "50%" finds "50%", not "500"
 Post.where { $0.authorID.in(activeAuthorIDs) }
 ```
+
+`like` and `ilike` take a pattern as written, so a `%` or `_` in interpolated
+user input is a wildcard; `contains` escapes it (`likeEscaped(_:)` does so by
+hand).
 
 **Aggregates and projections** into any `Decodable`:
 
