@@ -364,9 +364,11 @@ page.total          // matching rows, ignoring limit and offset
 page.pageCount      // and so hasNext, isLast, "showing 21–40 of 137"
 ```
 
-`PageRequest` clamps on construction, because a page size usually arrives
-from a query string and `?perPage=100000` should be a large page rather than
-a way to ask for the whole table. A query with no `ORDER BY` is paginated by
+`PageRequest` clamps on construction *and when decoded*, because a page size
+usually arrives from a query string and `?perPage=100000` should be a large
+page rather than a way to ask for the whole table. Its offset saturates
+instead of overflowing, so `?page=9223372036854775807` is an empty page, not
+a crashed process. A query with no `ORDER BY` is paginated by
 primary key — `LIMIT`/`OFFSET` without an order lets Postgres return a row on
 two pages or none.
 
@@ -509,6 +511,12 @@ and are never interpolated. Savepoint names are generated from an integer
 depth, never from user input.
 
 `SQLFragment`'s `\(raw:)` is the one deliberate hole, and it announces itself.
+
+Server errors arrive as a typed `DatabaseError` — `isUniqueViolation`,
+`constraint`, `columnName` — whose description never quotes row values, and
+failures are logged the same way. A transaction whose body swallowed a failed
+statement throws `HangarError.transactionAborted` instead of reporting a
+commit Postgres did not perform.
 
 ## Binding a repo to a connection you own
 

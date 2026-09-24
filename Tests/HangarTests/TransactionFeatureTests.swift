@@ -180,10 +180,8 @@ extension PostgresIntegrationSuite {
                     }
                 }
                 for await failure in group {
-                    if let psql = failure as? PSQLError,
-                        let state = psql.serverInfo?[.sqlState]
-                    {
-                        sqlStates.append(state)
+                    if let database = failure as? DatabaseError {
+                        sqlStates.append(database.sqlState)
                     } else if let failure {
                         sqlStates.append("unexpected: \(failure)")
                     }
@@ -269,8 +267,9 @@ extension PostgresIntegrationSuite {
                                     Post.where { $0.id == stored.id }.lockForUpdate())
                             }
                             return "acquired"
-                        } catch let error as PSQLError {
-                            return error.serverInfo?[.sqlState]
+                        } catch let error as DatabaseError {
+                            #expect(error.kind == .lockNotAvailable)
+                            return error.sqlState
                         } catch {
                             return "unexpected"
                         }

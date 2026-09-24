@@ -2,6 +2,20 @@
 /// the wire. PostgresNIO's errors (connection, server, cell-level decode)
 /// pass through untouched; these describe the layer above.
 public enum HangarError: Error, Sendable, CustomStringConvertible {
+    /// Postgres aborted the transaction, so nothing in it was committed.
+    ///
+    /// A statement inside the transaction failed, and the body carried on —
+    /// usually by catching that failure. Postgres rolls back an aborted
+    /// transaction whatever the client asks: the `COMMIT` is answered with
+    /// `ROLLBACK`, and a savepoint's `RELEASE` with SQLSTATE 25P02. `cause`
+    /// is the statement that failed first, when Hangar saw it.
+    ///
+    /// To recover from an expected failure *and keep the rest of the work*,
+    /// run the statement that may fail in a nested `transaction { }`: that is
+    /// a savepoint, and rolling back to it leaves the outer transaction
+    /// healthy.
+    case transactionAborted(cause: DatabaseError?)
+
     /// `Repo.current` was read where no ambient repo is bound. Task-locals
     /// propagate to structured child tasks but not across `Task.detached` —
     /// a detached task must be handed a `Repo` explicitly.
@@ -109,6 +123,10 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// usually reading it during an incident.
     public var description: String {
         switch self {
+        case .transactionAborted(let cause):
+            let why = cause.map { " The first statement to fail: \($0)." } ?? ""
+            return
+                "The transaction was rolled back, not committed: a statement inside it failed and the body carried on, and Postgres rolls back an aborted transaction whatever COMMIT asks.\(why) Run a statement that may fail inside a nested transaction { } (a savepoint) to recover from it and keep the rest of the work."
         case .noAmbientRepo:
             return
                 "No ambient Repo is bound on this task. Wrap the call in Repo.with(repo) { ... } — note that task-locals do not cross Task.detached."

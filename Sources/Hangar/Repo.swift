@@ -28,6 +28,10 @@ public struct Repo: Sendable {
     }
 
     let backend: Backend
+    /// Inside a transaction: the statements that failed, so a transaction
+    /// Postgres has aborted can say why when it refuses to commit. Shared by
+    /// every repo of one transaction, savepoints included.
+    let transactionLedger: TransactionLedger?
     /// Passed through to PostgresNIO per query, and the sink for Hangar's
     /// own per-query debug line; `nil` disables both.
     let logger: Logger?
@@ -39,6 +43,7 @@ public struct Repo: Sendable {
     /// A repo over one client — every read and write goes to it.
     public init(client: PostgresClient, logger: Logger? = nil) {
         self.backend = .client(primary: client, replica: nil)
+        self.transactionLedger = nil
         self.logger = logger
     }
 
@@ -48,11 +53,16 @@ public struct Repo: Sendable {
     /// at the same place.
     public init(primary: PostgresClient, replica: PostgresClient, logger: Logger? = nil) {
         self.backend = .client(primary: primary, replica: replica)
+        self.transactionLedger = nil
         self.logger = logger
     }
 
-    init(transaction connection: PostgresConnection, depth: Int, logger: Logger?) {
+    init(
+        transaction connection: PostgresConnection, depth: Int, ledger: TransactionLedger,
+        logger: Logger?
+    ) {
         self.backend = .transaction(connection, depth: depth)
+        self.transactionLedger = ledger
         self.logger = logger
     }
 
@@ -89,6 +99,7 @@ public struct Repo: Sendable {
         logger: Logger? = nil
     ) {
         self.backend = .transaction(connection, depth: inTransaction ? 1 : 0)
+        self.transactionLedger = inTransaction ? TransactionLedger() : nil
         self.logger = logger
     }
 
@@ -302,7 +313,7 @@ public struct Repo: Sendable {
     /// row locking, prefer `Query.lockForUpdate()` — typed, discoverable,
     /// and not raw SQL.
     @discardableResult
-    public func execute(_ statement: SQLFragment) async throws -> PostgresRowSequence {
+    public func execute(_ statement: SQLFragment) async throws -> DatabaseRows {
         let rendered = SQLRenderer.statement(statement)
         return try await execute(rendered.postgresQuery(), intent: .write, operation: "execute")
     }
@@ -570,7 +581,7 @@ public struct Repo: Sendable {
     /// consuming a large result set costs extra and is not included.
     func execute(
         _ query: PostgresQuery, intent: Intent, operation: String
-    ) async throws -> PostgresRowSequence {
+    ) async throws -> DatabaseRows {
         let start = ContinuousClock.now
         let sequence: PostgresRowSequence
         do {
@@ -582,8 +593,7 @@ public struct Repo: Sendable {
                 sequence = try await connection.query(query, logger: logger ?? Self.quietLogger)
             }
         } catch {
-            reportFailure(error, sql: query.sql, operation: operation)
-            throw error
+            throw failed(error, sql: query.sql, operation: operation)
         }
         let duration = ContinuousClock.now - start
         // Constructed per statement rather than cached per operation on
@@ -608,7 +618,23 @@ public struct Repo: Sendable {
                 "operation": .string(operation),
                 "duration_ms": .stringConvertible(Double(nanoseconds(of: duration)) / 1e6),
             ])
-        return sequence
+        let sql = query.sql
+        return DatabaseRows(base: sequence) { [self] error in
+            failed(error, sql: sql, operation: operation)
+        }
+    }
+
+    /// Everything that happens to a failed statement, in one place: server
+    /// errors become ``DatabaseError``, a failure inside a transaction is
+    /// recorded so the transaction can say why Postgres aborted it, and the
+    /// failure is reported once. Returns the error to throw.
+    func failed(_ error: any Error, sql: String, operation: String) -> any Error {
+        let translated = translatingDatabaseErrors(error)
+        if let database = translated as? DatabaseError, case .transaction(_, let depth) = backend {
+            transactionLedger?.record(database, depth: depth)
+        }
+        reportFailure(translated, sql: sql, operation: operation)
+        return translated
     }
 
     /// Says why a statement failed, once, where the statement is known.
@@ -624,17 +650,28 @@ public struct Repo: Sendable {
     ///
     /// Through the diagnostics logger, so it is not lost on a repo built
     /// without one — which is every repo `withRepo` constructs.
+    ///
+    /// The server's `DETAIL` is deliberately left out. For unique and
+    /// foreign-key violations it quotes the row — `Key (email)=(ada@…)` — and
+    /// an error-level line reaches every log sink an application has. The
+    /// column *names* it contains are kept; the values are not. The whole
+    /// server error is still on ``DatabaseError/underlying`` for code that
+    /// wants it on purpose.
     private func reportFailure(_ error: any Error, sql: String, operation: String) {
-        guard let psql = error as? PSQLError, let server = psql.serverInfo else { return }
+        guard let database = error as? DatabaseError else { return }
+        let server = database.underlying.serverInfo
         var metadata: Logger.Metadata = [
             "sql": .string(sql),
             "operation": .string(operation),
+            "sqlstate": .string(database.sqlState),
+            "message": .string(database.message),
         ]
-        if let state = server[.sqlState] { metadata["sqlstate"] = .string(state) }
-        if let message = server[.message] { metadata["message"] = .string(message) }
-        if let detail = server[.detail] { metadata["detail"] = .string(detail) }
-        if let hint = server[.hint] { metadata["hint"] = .string(hint) }
-        if let constraint = server[.constraintName] { metadata["constraint"] = .string(constraint) }
+        if let hint = server?[.hint] { metadata["hint"] = .string(hint) }
+        if let table = database.table { metadata["table"] = .string(table) }
+        if let constraint = database.constraint { metadata["constraint"] = .string(constraint) }
+        if !database.columns.isEmpty {
+            metadata["columns"] = .array(database.columns.map { .string($0) })
+        }
         diagnosticsLogger.error("hangar statement failed", metadata: metadata)
     }
 

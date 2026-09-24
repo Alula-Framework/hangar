@@ -4,6 +4,58 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A transaction no longer reports a commit that did not happen.** After any
+  statement fails, Postgres aborts the transaction and answers the final
+  `COMMIT` with `ROLLBACK` — no error. A body that caught the failure and
+  carried on therefore got a normal return with none of its work saved.
+  `transaction { }` now checks what `COMMIT` did and throws
+  `HangarError.transactionAborted(cause:)`, naming the statement that failed
+  first. A savepoint whose `RELEASE` is refused, and a statement run after
+  the failure (SQLSTATE 25P02), report the same error instead of a bare
+  25P02. Verified against Postgres; PostgresNIO's `withTransaction` and
+  Fluent have the same flaw.
+- **A request can no longer crash the process through pagination.**
+  `PageRequest.offset` multiplied without overflow checking, so
+  `?page=9223372036854775807` trapped. It saturates now, as do
+  `Page.firstIndex`/`lastIndex`. Decoding a `PageRequest` also clamps — the
+  synthesized decoder skipped it, letting `page=-5` through as a negative
+  `OFFSET` and `perPage=100000` as a hundred-thousand-row page — and missing
+  fields take their defaults.
+- **Failure logs no longer contain row data.** The error-level "statement
+  failed" line included the server's `DETAIL`, which for unique and
+  foreign-key violations quotes the row (`Key (email)=(ada@…)`). It now
+  carries the SQLSTATE, message, table, constraint and column *names* only.
+
+### Added
+
+- **`DatabaseError`: server errors, typed.** Every server-side failure a
+  `Repo` sees arrives as `DatabaseError` with a `kind` (`.uniqueViolation`,
+  `.foreignKeyViolation`, `.checkViolation`, `.notNullViolation`,
+  `.serializationFailure`, `.deadlock`, `.lockNotAvailable`, …), the
+  SQLSTATE, table, constraint, and the column names — for unique and
+  foreign-key violations read from the key list in the server detail, values
+  discarded. `description` is safe to log; the full `PSQLError` is
+  `underlying`. This is the type swift-changeset's documentation already
+  showed (`catch let error as DatabaseError where error.isUniqueViolation`),
+  which did not exist.
+- `PageRequest.clamped(maximumPerPage:)` and `PageRequest.defaultMaximumPerPage`.
+
+### Changed
+
+- **Breaking: server errors are `DatabaseError`, not `PSQLError`.** Code that
+  caught `PSQLError` and read `serverInfo[.sqlState]` should catch
+  `DatabaseError` and read `kind` or `sqlState`. Errors that never reached
+  the server (connection, decoding, client-side limits) are unchanged.
+- **Breaking: `Repo.execute` returns `DatabaseRows`**, which iterates and
+  `decode`s exactly like `PostgresRowSequence` and applies the same error
+  handling to failures that arrive with the rows.
+- **Breaking: `PageRequest.page` and `perPage` are read-only**, so the
+  clamping cannot be assigned away.
+
 ## [0.9.2] - 2026-09-23
 
 ### Changed

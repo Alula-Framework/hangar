@@ -39,6 +39,52 @@ try await repo.transaction { tx in
 
 Savepoint names are generated from the nesting depth, never from user input.
 
+## A failure you catch still aborts the transaction
+
+Once any statement fails, Postgres aborts the whole transaction: every later
+statement is refused, and the `COMMIT` at the end is answered with `ROLLBACK`
+— without an error. Catching the failure in the body does not undo that:
+
+```swift
+try await repo.transaction { tx in
+    try await tx.insert(order)
+    do {
+        try await tx.insert(duplicateCoupon)     // fails: unique violation
+    } catch {
+        // The transaction is already aborted. `order` will not be saved.
+    }
+}
+```
+
+Hangar checks what `COMMIT` actually did, so this throws
+``HangarError/transactionAborted(cause:)`` naming the statement that failed,
+rather than returning as if the order had been saved. A savepoint's `RELEASE`
+in the same state, and any statement after the failure, report the same
+error. To survive an expected failure, run it in a nested `transaction` — a
+savepoint — as in the previous section; rolling back to the savepoint leaves
+the outer transaction healthy.
+
+## Database errors are typed
+
+Server errors arrive as ``DatabaseError``: a ``DatabaseError/Kind`` for the
+cases worth branching on (unique, foreign-key, check and not-null
+violations, serialization failures, deadlocks, lock timeouts), plus the
+SQLSTATE, table, constraint and column *names*:
+
+```swift
+do {
+    try await repo.insert(user)
+} catch let error as DatabaseError where error.isUniqueViolation {
+    // error.constraint == "users_email_key", error.columnName == "email"
+}
+```
+
+Its description never includes row values — the server's detail for a
+unique violation quotes the row, so it stays on
+``DatabaseError/underlying`` for code that wants it deliberately. Errors that
+never reached the server (a lost connection, a decoding failure) keep their
+own types.
+
 ## Binding a repo to a connection you own
 
 A repo normally holds a pool. It can instead be pinned to a single connection
@@ -78,7 +124,8 @@ try await repo.transaction(isolation: .serializable) { tx in ... }
 ```
 
 Under `SERIALIZABLE`, concurrent conflicting transactions fail with SQLSTATE
-`40001` — that is the isolation level working as designed, and the remedy is
+`40001` (``DatabaseError/Kind/serializationFailure``), and any isolation level
+can pick a deadlock victim (`40P01`) — that is the isolation level working as designed, and the remedy is
 to run the whole transaction again:
 
 ```swift

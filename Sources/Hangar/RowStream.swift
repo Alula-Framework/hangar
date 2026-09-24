@@ -13,13 +13,13 @@ import Synchronization
 /// `HangarError.streamLeaseExpired` on the first `next()` rather than
 /// reading from a connection some other query now owns.
 public struct PostgresRowStream<Element: Sendable>: AsyncSequence, Sendable {
-    let rows: PostgresRowSequence
+    let rows: DatabaseRows
     let decode: @Sendable (PostgresRow) throws -> Element
     let lease: StreamLease
 
     /// Decodes one row per `next()`, while the lease is live.
     public struct AsyncIterator: AsyncIteratorProtocol {
-        var base: PostgresRowSequence.AsyncIterator
+        var base: DatabaseRows.AsyncIterator
         let decode: @Sendable (PostgresRow) throws -> Element
         let lease: StreamLease
 

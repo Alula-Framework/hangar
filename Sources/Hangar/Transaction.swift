@@ -1,5 +1,6 @@
 import Logging
 import PostgresNIO
+import Synchronization
 
 // Transactions. The `Repo` handed to the body is bound to the
 // transaction's connection, so everything inside participates. Throwing
@@ -53,33 +54,43 @@ extension Repo {
             return try await primary.withConnection { connection in
                 let control = TransactionControl(depth: 0, isolation: isolation)
                 let log = logger ?? Self.quietLogger
-                _ = try await connection.query(control.begin, logger: log)
-                let tx = Repo(transaction: connection, depth: 1, logger: logger)
+                let ledger = TransactionLedger()
+                try await control.run(\.begin, on: connection, logger: log)
+                let tx = Repo(transaction: connection, depth: 1, ledger: ledger, logger: logger)
                 do {
                     let result = try await body(tx)
-                    _ = try await connection.query(control.commit, logger: log)
+                    try await control.finish(on: connection, ledger: ledger, logger: log)
                     return result
                 } catch {
                     // Roll back and surface the body's error. If the
                     // rollback itself fails the connection is beyond saving
                     // — the pool discards it, and the original error is
                     // still the story.
-                    _ = try? await connection.query(control.rollback, logger: log)
-                    throw error
+                    let surfaced = control.surface(error, ledger: ledger)
+                    await control.rollBack(on: connection, ledger: ledger, logger: log)
+                    throw surfaced
                 }
             }
         case .transaction(let connection, let depth):
             let control = TransactionControl(depth: depth, isolation: isolation)
             let log = logger ?? Self.quietLogger
-            _ = try await connection.query(control.begin, logger: log)
-            let tx = Repo(transaction: connection, depth: depth + 1, logger: logger)
+            let ledger = transactionLedger ?? TransactionLedger()
+            do {
+                try await control.run(\.begin, on: connection, logger: log)
+            } catch {
+                // A SAVEPOINT refused because the enclosing transaction is
+                // already aborted: say so, with the cause.
+                throw control.surface(error, ledger: ledger)
+            }
+            let tx = Repo(transaction: connection, depth: depth + 1, ledger: ledger, logger: logger)
             do {
                 let result = try await body(tx)
-                _ = try await connection.query(control.commit, logger: log)
+                try await control.finish(on: connection, ledger: ledger, logger: log)
                 return result
             } catch {
-                _ = try? await connection.query(control.rollback, logger: log)
-                throw error
+                let surfaced = control.surface(error, ledger: ledger)
+                await control.rollBack(on: connection, ledger: ledger, logger: log)
+                throw surfaced
             }
         }
     }
@@ -136,9 +147,7 @@ extension Repo {
         while true {
             do {
                 return try await transaction(isolation: isolation, body)
-            } catch let error as PSQLError
-                where attempt < maxAttempts && Self.isRetryableConflict(error)
-            {
+            } catch let error as DatabaseError where attempt < maxAttempts && error.isRetryable {
                 // Wait a jittered moment rather than looping straight back in.
                 //
                 // Two transactions that serialization-conflict are, by
@@ -170,23 +179,21 @@ extension Repo {
     /// sits in a request path.
     private static let retryBackoffBaseMilliseconds = 10
 
-    /// SQLSTATE 40001 (serialization_failure) or 40P01 (deadlock_detected):
-    /// the two "run it again" answers Postgres gives.
-    private static func isRetryableConflict(_ error: PSQLError) -> Bool {
-        let state = error.serverInfo?[.sqlState]
-        return state == "40001" || state == "40P01"
-    }
 }
 
 /// The statement triple for one nesting level: `BEGIN`/`COMMIT`/`ROLLBACK`
 /// at the outermost level, savepoint forms inside. Savepoint names are
 /// generated from the depth — never from user input.
 struct TransactionControl {
+    /// The depth of the repo that opened this level: 0 for `BEGIN`, ≥1 for
+    /// a savepoint. Statements *inside* the level run one deeper.
+    let depth: Int
     let begin: PostgresQuery
     let commit: PostgresQuery
     let rollback: PostgresQuery
 
     init(depth: Int, isolation: IsolationLevel? = nil) {
+        self.depth = depth
         if depth == 0 {
             // The level's SQL text comes from a closed enum, never from
             // user input — same rule as the savepoint names below.
@@ -200,6 +207,109 @@ struct TransactionControl {
             commit = PostgresQuery(unsafeSQL: "RELEASE SAVEPOINT \(name)")
             rollback = PostgresQuery(unsafeSQL: "ROLLBACK TO SAVEPOINT \(name)")
         }
+    }
+
+    func run(
+        _ statement: KeyPath<TransactionControl, PostgresQuery>, on connection: PostgresConnection,
+        logger: Logger
+    ) async throws {
+        do {
+            _ = try await connection.query(self[keyPath: statement], logger: logger)
+        } catch {
+            throw translatingDatabaseErrors(error)
+        }
+    }
+
+    /// Commits the level, or throws if Postgres will not.
+    ///
+    /// **A `COMMIT` can succeed without committing.** Once any statement in
+    /// a transaction fails, Postgres aborts the whole transaction; if the
+    /// body caught that failure and returned normally, the `COMMIT` that
+    /// follows is answered with the command tag `ROLLBACK` and *no error*.
+    /// Reading only for errors, the caller would be told its work was saved
+    /// when none of it was — the one failure mode a transaction exists to
+    /// rule out. The tag is therefore checked, and a `ROLLBACK` answer throws
+    /// ``HangarError/transactionAborted(cause:)`` naming the statement that
+    /// failed.
+    ///
+    /// A savepoint has the same hazard with a louder symptom: `RELEASE` in
+    /// an aborted transaction fails with SQLSTATE 25P02. That is mapped to
+    /// the same error, so both levels say the same true thing.
+    func finish(on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger) async throws {
+        if depth == 0 {
+            let result: PostgresQueryResult
+            do {
+                result = try await connection.query(commit, logger: logger).get()
+            } catch {
+                throw translatingDatabaseErrors(error)
+            }
+            if result.metadata.command == "ROLLBACK" {
+                throw HangarError.transactionAborted(cause: ledger.firstFailure)
+            }
+        } else {
+            do {
+                _ = try await connection.query(commit, logger: logger)
+            } catch {
+                throw surface(error, ledger: ledger)
+            }
+        }
+    }
+
+    /// The error a failed level reports. Server errors become
+    /// ``DatabaseError``; SQLSTATE 25P02 — "current transaction is aborted"
+    /// — becomes ``HangarError/transactionAborted(cause:)`` naming the
+    /// statement that actually failed, because 25P02 is only ever the
+    /// consequence of an earlier failure and on its own sends someone looking
+    /// in the wrong place.
+    func surface(_ error: any Error, ledger: TransactionLedger) -> any Error {
+        let translated = translatingDatabaseErrors(error)
+        if let database = translated as? DatabaseError, database.kind == .transactionAborted {
+            return HangarError.transactionAborted(cause: ledger.firstFailure)
+        }
+        return translated
+    }
+
+    /// Rolls the level back. Never throws: this runs while another error is
+    /// already on its way out, and that error is the one worth reporting.
+    ///
+    /// A successful `ROLLBACK TO SAVEPOINT` repairs an aborted transaction —
+    /// statements after it run normally — so the failures recorded inside
+    /// the savepoint are forgotten; they can no longer be the reason a later
+    /// `COMMIT` refuses.
+    func rollBack(on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger) async {
+        do {
+            _ = try await connection.query(rollback, logger: logger)
+            ledger.forget(deeperThan: depth)
+        } catch {
+            // The connection is beyond saving; the pool discards it.
+        }
+    }
+}
+
+/// The failed statements of one transaction, shared by the repos of all its
+/// levels.
+///
+/// It exists so an aborted transaction can explain itself. By the time
+/// `COMMIT` is refused, the statement that doomed the transaction is long
+/// gone — typically caught and ignored in the body — and "transaction
+/// aborted" with no cause sends someone hunting.
+final class TransactionLedger: Sendable {
+    private let failures = Mutex<[(depth: Int, error: DatabaseError)]>([])
+
+    func record(_ error: DatabaseError, depth: Int) {
+        // 25P02 is the *consequence* of an earlier failure, never the cause.
+        guard error.kind != .transactionAborted else { return }
+        failures.withLock { $0.append((depth, error)) }
+    }
+
+    /// The earliest failure no savepoint rollback has repaired — the one
+    /// that aborted the transaction.
+    var firstFailure: DatabaseError? {
+        failures.withLock { $0.first?.error }
+    }
+
+    func forget(deeperThan depth: Int) {
+        failures.withLock { $0.removeAll { $0.depth > depth } }
     }
 }
 
