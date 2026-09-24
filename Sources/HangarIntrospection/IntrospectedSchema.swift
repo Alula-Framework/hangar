@@ -31,6 +31,9 @@ public struct IntrospectedColumn: Sendable, Equatable {
     }
 
     public var isArray: Bool { udtName.hasPrefix("_") }
+    /// The type of one element: the column's own type, or for an array the
+    /// element's (Postgres names `role[]` `_role`).
+    public var elementUdtName: String { isArray ? String(udtName.dropFirst()) : udtName }
     public var isEnum: Bool { !enumLabels.isEmpty }
 }
 

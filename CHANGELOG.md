@@ -80,6 +80,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `lock(.noKeyUpdate)` locks a row for a non-key change without blocking
   inserts that reference it. `lockForUpdate()`/`lockForShare()` are
   unchanged.
+- **Zone-free temporal types.** `CalendarDate` (`date`), `LocalDateTime`
+  (`timestamp`), `LocalTime` (`time`) and `PostgresInterval` (`interval`)
+  travel in each column's own wire format, so no time zone is consulted. A
+  `Date` bound to a `date` or `timestamp` column goes through the session's
+  time zone — a `date` written from Tokyo lands a day later than from UTC,
+  and a `timestamp` read back is off by the session's offset.
+  `hangar-introspect` now maps `date`, `timestamp`, `time` and `interval` to
+  them (it mapped the first two to `Date` and skipped the others), `date[]`
+  to `[CalendarDate]`, and enum arrays to `EnumArray`, declaring each enum
+  once.
 - **`isDistinct(from:)` / `isNotDistinct(from:)`** on optional columns render
   `IS [NOT] DISTINCT FROM` — Swift's answer for NULL. `!=` keeps SQL's
   (NULL rows are not returned, consistent with `!(==)`), now documented.

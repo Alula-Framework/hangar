@@ -508,6 +508,27 @@ compiler explains rather than saying "binary operator cannot be applied".
 push and fails if any of them builds — a compile-time guarantee is exactly the
 kind of claim that rots silently when an overload is widened.
 
+## Column types
+
+| Postgres | Swift |
+|---|---|
+| `boolean`, `smallint`, `integer`, `bigint` | `Bool`, `Int16`, `Int32`, `Int`/`Int64` |
+| `real`, `double precision`, `numeric` | `Float`, `Double`, `Decimal` |
+| `text`, `varchar`, `uuid`, `bytea` | `String`, `String`, `UUID`, `Data` |
+| `timestamptz` | `Date` — an instant |
+| `date` | `CalendarDate` — a day, never shifted by a time zone |
+| `timestamp` | `LocalDateTime` — a wall-clock reading |
+| `time`, `interval` | `LocalTime`, `PostgresInterval` |
+| `jsonb`, `json` | any `Codable`, marked `@JSONB` |
+| a `CREATE TYPE … AS ENUM` | a `String` enum conforming to `PostgresEnum` |
+| `T[]` | `[T]`; `NullableArray<T>` when elements can be NULL; `EnumArray<E>` for enums |
+
+`Date` belongs on `timestamptz` only. Bound to a `date` or `timestamp`
+column it is converted through the *session's* time zone, so the stored day
+or wall-clock time depends on which server wrote it — the day-off-by-one that
+Fluent and PostgresNIO users keep reporting. The zone-free types exist so that
+cannot happen, and `hangar-introspect` maps the columns to them.
+
 ## Safety
 
 Identifiers are always quoted with embedded quotes doubled. Values are always

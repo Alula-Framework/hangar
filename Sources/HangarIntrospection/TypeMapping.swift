@@ -11,7 +11,9 @@ public enum TypeMapping {
     /// The Swift type for a column, or nil when there is no safe answer.
     public static func swiftType(for column: IntrospectedColumn) -> String? {
         if column.isEnum {
-            return enumTypeName(for: column.udtName)
+            let name = enumTypeName(for: column.elementUdtName)
+            // PostgresNIO has no array coding for enums; EnumArray is Hangar's.
+            return column.isArray ? "EnumArray<\(name)>" : name
         }
         if column.isArray {
             // Postgres names an array type by prefixing its element's name.
@@ -24,7 +26,7 @@ public enum TypeMapping {
             // numeric[] or bytea[] column is left for a human.
             let arrayable: Set<String> = [
                 "Bool", "Int16", "Int32", "Int", "Int64", "Float", "Double", "String", "UUID",
-                "Date",
+                "Date", "CalendarDate",
             ]
             return arrayable.contains(inner) ? "[\(inner)]" : nil
         }
@@ -44,8 +46,14 @@ public enum TypeMapping {
         "bpchar": "String",
         "name": "String",
         "uuid": "UUID",
-        "date": "Date",
-        "timestamp": "Date",
+        // A day, not an instant: `Date` would go through timestamptz and
+        // land on a different day depending on the session's time zone.
+        "date": "CalendarDate",
+        // Wall-clock time: a `Date` would round-trip through timestamptz
+        // and shift by the session's time-zone offset.
+        "timestamp": "LocalDateTime",
+        "time": "LocalTime",
+        "interval": "PostgresInterval",
         "timestamptz": "Date",
         "bytea": "Data",
         "json": "String",

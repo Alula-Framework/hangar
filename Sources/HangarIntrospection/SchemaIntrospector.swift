@@ -56,7 +56,8 @@ public struct SchemaIntrospector: Sendable {
                     name: column, udtName: udt, isNullable: nullable,
                     isPrimaryKey: keys[table]?.contains(column) ?? false,
                     hasDefault: hasDefault, isIdentity: isIdentity,
-                    enumLabels: enums[udt] ?? []))
+                    // An enum array (`_role`) carries its element's labels.
+                    enumLabels: enums[udt] ?? (udt.hasPrefix("_") ? enums[String(udt.dropFirst())] : nil) ?? []))
         }
 
         return byTable.keys.sorted().map { name in

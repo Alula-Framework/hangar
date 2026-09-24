@@ -48,7 +48,9 @@ public struct EntityGenerator: Sendable {
         lines.append("import Hangar")
         lines.append("")
 
-        for column in table.columns where column.isEnum {
+        // Once per enum type: a scalar and an array column may share one.
+        var declared = Set<String>()
+        for column in table.columns where column.isEnum && declared.insert(column.elementUdtName).inserted {
             lines.append(contentsOf: enumDeclaration(for: column, access: access))
             lines.append("")
         }
@@ -94,9 +96,9 @@ public struct EntityGenerator: Sendable {
     }
 
     private func enumDeclaration(for column: IntrospectedColumn, access: String) -> [String] {
-        let name = TypeMapping.enumTypeName(for: column.udtName)
+        let name = TypeMapping.enumTypeName(for: column.elementUdtName)
         var lines = [
-            "/// Generated from the Postgres enum `\(column.udtName)`.",
+            "/// Generated from the Postgres enum `\(column.elementUdtName)`.",
             "\(access)enum \(name): String, PostgresEnum, Sendable, Equatable, Codable {",
         ]
         for label in column.enumLabels {
