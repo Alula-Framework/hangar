@@ -162,6 +162,27 @@ extension PostgresIntegrationSuite {
             }
         }
 
+        /// "The last N rows" takes N from a request. A negative N used to be a
+        /// precondition failure that stopped the process; it is Postgres's
+        /// error now, and fails only the request that asked for it.
+        @Test("a negative frame offset fails the request, not the process")
+        func negativeOffsetFailsTheRequest() async throws {
+            try await withRepo { repo in
+                _ = try await seed(repo)
+                let fromRequest = -1
+                await #expect(throws: DatabaseError.self) {
+                    _ = try await repo.all(
+                        Post.all.select(into: Trailing.self) { post in
+                            (
+                                title: post.title,
+                                trailing: post.viewCount.sum().over(
+                                    .order(by: post.viewCount.asc()).rows(from: .preceding(fromRequest)))
+                            )
+                        })
+                }
+            }
+        }
+
         @Test("an empty window sees every row the query returned")
         func emptyWindowCountsEverything() async throws {
             try await withRepo { repo in

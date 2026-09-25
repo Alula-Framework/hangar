@@ -14,15 +14,15 @@
 // "binary operator cannot be applied". `GROUP BY` takes a column rather than
 // an expression, so it was never spellable there.
 
-/// A frame offset is a count of rows, so it cannot be negative.
+/// A frame offset is a count of rows, so it cannot be negative — and
+/// Postgres says so ("frame starting offset must not be negative"), which
+/// reaches the caller as a ``DatabaseError``.
 ///
-/// Postgres answers one that is with "frame starting offset must not be
-/// negative" on the request that runs it; this says the same thing at the
-/// call, which is where the literal was written.
-private func checkedOffset(_ offset: Int) -> Int {
-    precondition(offset >= 0, "a frame offset counts rows and cannot be negative, got \(offset)")
-    return offset
-}
+/// This was a precondition, on the reasoning that the offset is a literal
+/// written at the call. It is not always: "the last N rows" takes N from a
+/// request, and a negative N stopped the whole process rather than failing
+/// that one request.
+private func checkedOffset(_ offset: Int) -> Int { offset }
 
 /// Where a frame starts.
 ///

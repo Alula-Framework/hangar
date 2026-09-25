@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`HGR-QUERY-4005`, with a page) when the query runs, before anything is sent.
   `HangarError` gains that case, so an exhaustive `switch` over it needs one
   more.
+- **A negative window-frame offset fails the request, not the process.** It
+  was a precondition, on the reasoning that the offset is a literal at the
+  call; "the last N rows" takes N from a request. Postgres's own error now
+  reaches the caller as a `DatabaseError`.
 
 ## [0.10.2] - 2026-09-25
 
