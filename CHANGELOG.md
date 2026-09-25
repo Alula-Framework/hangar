@@ -38,6 +38,14 @@ by tests.
 
 ### Added
 
+- **`TransactionObserver`** — `Repo(connection:…, transactionObserver:)` is
+  told when the repo opens and closes its outermost transaction on the
+  pinned connection (`began` before `BEGIN`, `ended` once `COMMIT` or
+  `ROLLBACK` has been answered, exactly once). It is the seam a pool needs
+  to never hand the next borrower a connection with a transaction still
+  open, without Hangar knowing anything about the pool; alula-data 0.17.0
+  uses it. A property test checks one began/ended pair for every generated
+  transaction body, failing or not.
 - `DatabaseError.kindName`.
 
 ## [0.10.0] - 2026-09-24

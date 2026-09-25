@@ -86,6 +86,14 @@ extension Repo {
             let control = TransactionControl(depth: depth, isolation: isolation, statementTimeout: statementTimeout)
             let log = logger ?? Self.quietLogger
             let ledger = transactionLedger ?? TransactionLedger()
+            // A pinned repo's outermost transaction: tell the connection's
+            // owner before BEGIN is sent, so a scope that dies anywhere after
+            // it still reads as "maybe open" and gets rolled back.
+            let observer = depth == 0 ? transactionObserver : nil
+            observer?.began()
+            // Both COMMIT-answered and ROLLBACK-succeeded end the transaction,
+            // and a refused COMMIT reaches both; report the end once.
+            let ended = observer.map { observer in OnceAction(observer.ended) }
             do {
                 try await control.run(\.begin, on: connection, logger: log)
             } catch {
@@ -97,11 +105,11 @@ extension Repo {
             do {
                 try await control.applySettings(on: connection, logger: log)
                 let result = try await body(tx)
-                try await control.finish(on: connection, ledger: ledger, logger: log)
+                try await control.finish(on: connection, ledger: ledger, logger: log, ended: ended?.run)
                 return result
             } catch {
                 let surfaced = control.surface(error, ledger: ledger)
-                await control.rollBack(on: connection, ledger: ledger, logger: log)
+                await control.rollBack(on: connection, ledger: ledger, logger: log, ended: ended?.run)
                 throw surfaced
             }
         }
@@ -277,7 +285,10 @@ struct TransactionControl {
     /// it served went away. Committing that work would make durable what the
     /// caller abandoned; the outermost level checks first and throws
     /// `CancellationError`, which rolls the transaction back.
-    func finish(on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger) async throws {
+    func finish(
+        on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger,
+        ended: (@Sendable () -> Void)? = nil
+    ) async throws {
         if depth == 0 {
             try Task.checkCancellation()
             let result: PostgresQueryResult
@@ -286,6 +297,8 @@ struct TransactionControl {
             } catch {
                 throw translatingDatabaseErrors(error)
             }
+            // COMMIT answered — with COMMIT or ROLLBACK, the transaction is over.
+            ended?()
             if result.metadata.command == "ROLLBACK" {
                 throw HangarError.transactionAborted(cause: ledger.firstFailure)
             }
@@ -319,13 +332,52 @@ struct TransactionControl {
     /// statements after it run normally — so the failures recorded inside
     /// the savepoint are forgotten; they can no longer be the reason a later
     /// `COMMIT` refuses.
-    func rollBack(on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger) async {
+    func rollBack(
+        on connection: PostgresConnection, ledger: TransactionLedger, logger: Logger,
+        ended: (@Sendable () -> Void)? = nil
+    ) async {
         do {
             _ = try await connection.query(rollback, logger: logger)
             ledger.forget(deeperThan: depth)
+            ended?()
         } catch {
             // The connection is beyond saving; the pool discards it.
         }
+    }
+}
+
+/// Told when a connection-pinned `Repo` opens and closes its outermost
+/// transaction — the seam a connection pool needs so it never hands a
+/// connection to the next borrower with a transaction still open on it.
+///
+/// Hangar sends `BEGIN` and `COMMIT` itself, so an owner that leases
+/// connections cannot otherwise tell a connection mid-transaction from an
+/// idle one. `began` runs before `BEGIN` is sent; `ended` runs once `COMMIT`
+/// or `ROLLBACK` has been answered. A scope that dies in between — or a
+/// `ROLLBACK` that fails — leaves the owner holding "began" with no "ended",
+/// which is exactly the connection it should roll back or discard. Nested
+/// levels are savepoints and are not reported.
+public struct TransactionObserver: Sendable {
+    public var began: @Sendable () -> Void
+    public var ended: @Sendable () -> Void
+
+    public init(began: @escaping @Sendable () -> Void, ended: @escaping @Sendable () -> Void) {
+        self.began = began
+        self.ended = ended
+    }
+}
+
+/// Runs its action the first time `run` is called, and never again.
+final class OnceAction: Sendable {
+    private let action: @Sendable () -> Void
+    private let done = Mutex(false)
+    init(_ action: @escaping @Sendable () -> Void) { self.action = action }
+    @Sendable func run() {
+        let first = done.withLock { done in
+            defer { done = true }
+            return !done
+        }
+        if first { action() }
     }
 }
 

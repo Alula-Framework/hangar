@@ -32,6 +32,9 @@ public struct Repo: Sendable {
     /// Postgres has aborted can say why when it refuses to commit. Shared by
     /// every repo of one transaction, savepoints included.
     let transactionLedger: TransactionLedger?
+    /// Told when this repo opens and closes an outermost transaction on its
+    /// pinned connection — see ``TransactionObserver``.
+    let transactionObserver: TransactionObserver?
     /// Passed through to PostgresNIO per query, and the sink for Hangar's
     /// own per-query debug line; `nil` disables both.
     let logger: Logger?
@@ -44,6 +47,7 @@ public struct Repo: Sendable {
     public init(client: PostgresClient, logger: Logger? = nil) {
         self.backend = .client(primary: client, replica: nil)
         self.transactionLedger = nil
+        self.transactionObserver = nil
         self.logger = logger
     }
 
@@ -54,6 +58,7 @@ public struct Repo: Sendable {
     public init(primary: PostgresClient, replica: PostgresClient, logger: Logger? = nil) {
         self.backend = .client(primary: primary, replica: replica)
         self.transactionLedger = nil
+        self.transactionObserver = nil
         self.logger = logger
     }
 
@@ -63,6 +68,7 @@ public struct Repo: Sendable {
     ) {
         self.backend = .transaction(connection, depth: depth)
         self.transactionLedger = ledger
+        self.transactionObserver = nil
         self.logger = logger
     }
 
@@ -93,13 +99,19 @@ public struct Repo: Sendable {
     ///     open transaction, as a framework integration binding a
     ///     request-scoped connection does. `transaction { }` then nests as a
     ///     savepoint, which is what it should have been.
+    ///   - transactionObserver: Told when this repo opens and closes an
+    ///     outermost transaction on `connection` — for a pool that must not
+    ///     hand the connection on while one is open. See
+    ///     ``TransactionObserver``.
     public init(
         connection: PostgresConnection,
         inTransaction: Bool = false,
-        logger: Logger? = nil
+        logger: Logger? = nil,
+        transactionObserver: TransactionObserver? = nil
     ) {
         self.backend = .transaction(connection, depth: inTransaction ? 1 : 0)
         self.transactionLedger = inTransaction ? TransactionLedger() : nil
+        self.transactionObserver = transactionObserver
         self.logger = logger
     }
 

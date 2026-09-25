@@ -68,6 +68,44 @@ extension PostgresIntegrationSuite {
             }
         }
 
+        /// Thread-safe event log for the observer.
+        final class Events: @unchecked Sendable {
+            private let lock = NSLock()
+            private var log: [String] = []
+            func append(_ event: String) { lock.lock(); log.append(event); lock.unlock() }
+            var all: [String] { lock.lock(); defer { lock.unlock() }; return log }
+        }
+
+        @Test("a pinned repo reports exactly one began/ended pair per outermost transaction, whatever the body does")
+        func observerPairs() async throws {
+            try await withRepo { repo in
+                guard case .client(let client, _) = repo.backend else { return }
+                try await client.withConnection { connection in
+                    await propertyCheck(count: 60, input: TransactionIntegrityTests.programs) { steps in
+                        _ = try? await repo.execute(#"DELETE FROM "hangar_kv""#)
+                        try await repo.insert(KV(key: "taken", value: "first"))
+                        let events = Events()
+                        let pinned = Repo(
+                            connection: connection,
+                            transactionObserver: TransactionObserver(
+                                began: { events.append("began") }, ended: { events.append("ended") }))
+                        _ = try? await pinned.transaction { tx in
+                            for (index, step) in steps.enumerated() {
+                                try await TransactionIntegrityTests.run(step, index: index, in: tx)
+                            }
+                        }
+                        #expect(events.all == ["began", "ended"], "\(steps)")
+                        // And the connection really is out of its transaction.
+                        for try await inside in try await pinned.execute(
+                            "SELECT count(*)::int FROM pg_stat_activity WHERE pid = pg_backend_pid() AND backend_xid IS NOT NULL"
+                        ).decode(Int.self) {
+                            #expect(inside == 0)
+                        }
+                    }
+                }
+            }
+        }
+
         @Test("a server message that quotes data stays out of the description and the log")
         func messagesNotLogged() async throws {
             let recorder = LogRecorder()
