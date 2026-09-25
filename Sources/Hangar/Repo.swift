@@ -335,18 +335,20 @@ public struct Repo: Sendable {
         return stored
     }
 
-    /// Inserts every model in one statement — one round trip, however many
-    /// rows — and returns them as the database now holds them, in input
-    /// order. An empty array is a no-op answering `[]`.
+    /// Inserts every model and returns them as the database now holds them,
+    /// in input order. An empty array is a no-op answering `[]`.
     ///
     /// ```swift
     /// let stored = try await repo.insert(rows.map(Event.init))
     /// ```
     ///
-    /// This is one statement but **not** a transaction of its own beyond
-    /// what a single statement already is: it is atomic — all rows or, on
-    /// any constraint violation, none — because a failed statement inserts
-    /// nothing.
+    /// Usually one statement — one round trip. A batch whose rows × columns
+    /// exceed the 65,535 parameters one statement can bind is split into
+    /// several statements inside one transaction (a savepoint when already in
+    /// one). Either way it is atomic: all rows or, on any constraint
+    /// violation, none. What splitting does change is anything tied to
+    /// *statement* boundaries — statement-level triggers and their transition
+    /// tables fire once per chunk.
     @discardableResult
     public func insert<M: Table>(_ models: [M]) async throws -> [M] {
         try await insert(models, conflict: nil)
@@ -360,7 +362,11 @@ public struct Repo: Sendable {
     ///
     /// Postgres refuses a statement whose rows conflict with *each other*
     /// under `DO UPDATE` (SQLSTATE 21000, "cannot affect row a second
-    /// time"): deduplicate the input first.
+    /// time"): deduplicate the input first. A batch large enough to be split
+    /// keeps that rule — repeated conflict keys are refused before anything
+    /// is sent (`HangarError.invalidConflictClause`), because the split
+    /// statements would otherwise each update the row and succeed. For the
+    /// same reason a split `DO UPDATE` must name its target by columns.
     @discardableResult
     public func insert<M: Table>(_ models: [M], onConflict: OnConflict<M>) async throws -> [M] {
         try await insert(models, conflict: onConflict)
@@ -375,6 +381,9 @@ public struct Repo: Sendable {
         let perStatement = Self.rowsPerInsert(columns: M.schema.insertable.count, reserving: reserved)
         guard models.count > perStatement else {
             return try await insertBatch(models, conflict: conflict)
+        }
+        if let conflict, case .update = conflict.action {
+            try Self.refuseRepeatedConflictKeys(models, conflict)
         }
         // More values than one statement can carry. Postgres's protocol counts
         // parameters in a 16-bit field, so a statement binds at most 65,535;
@@ -391,6 +400,47 @@ public struct Repo: Sendable {
                 start = end
             }
             return stored
+        }
+    }
+
+    /// Chunking must not change what an upsert means.
+    ///
+    /// In one statement, two rows that target the same conflicting row make
+    /// Postgres refuse the whole `DO UPDATE` (SQLSTATE 21000, "cannot affect
+    /// row a second time"). Split across statements, the second chunk would
+    /// quietly update the row again — the same input succeeding or failing
+    /// depending only on its size. So before splitting, the conflict keys are
+    /// checked for repeats, and a batch that repeats one is refused as the
+    /// single statement would have been.
+    ///
+    /// The check needs the key: a constraint-named target, or a key column
+    /// whose Swift type is not `Hashable`, cannot be checked, and such a batch
+    /// is refused rather than split on faith. Equality is Swift's — a
+    /// case-insensitive collation or `citext` key could still hide a repeat.
+    static func refuseRepeatedConflictKeys<M: Table>(_ models: [M], _ conflict: OnConflict<M>) throws {
+        guard case .columns(let keyPaths, _) = conflict.target, !keyPaths.isEmpty else {
+            throw HangarError.invalidConflictClause(
+                table: M.schema.name,
+                reason:
+                    "DO UPDATE over more rows than one statement can bind is split into several statements, which is only equivalent when no two rows share a conflict key — name the target by its columns so that can be checked, or split the batch yourself")
+        }
+        var seen = Set<[AnyHashable]>()
+        for model in models {
+            var key: [AnyHashable] = []
+            for keyPath in keyPaths {
+                guard let value = model[keyPath: keyPath] as? AnyHashable else {
+                    throw HangarError.invalidConflictClause(
+                        table: M.schema.name,
+                        reason: "a conflict-target column is not Hashable, so repeats across chunks cannot be ruled out — split the batch yourself")
+                }
+                key.append(value)
+            }
+            guard seen.insert(key).inserted else {
+                throw HangarError.invalidConflictClause(
+                    table: M.schema.name,
+                    reason:
+                        "two rows in the batch share a conflict key; Postgres refuses that within one DO UPDATE (SQLSTATE 21000), and splitting the batch would change the result — deduplicate the input")
+            }
         }
     }
 
@@ -411,8 +461,13 @@ public struct Repo: Sendable {
     /// Rows per multi-row `INSERT` so that `rows × columns` stays within
     /// ``maximumBindParameters``.
     static func rowsPerInsert(columns: Int, reserving reserved: Int = 0) -> Int {
-        max(1, (maximumBindParameters - reserved) / max(1, columns))
+        let limit = bindParameterLimitOverride ?? maximumBindParameters
+        return max(1, (limit - reserved) / max(1, columns))
     }
+
+    /// Tests only: a smaller limit, so chunking can be exercised with a
+    /// handful of rows instead of tens of thousands.
+    @TaskLocal static var bindParameterLimitOverride: Int?
 
     /// Writes every non-key column of the model's row, identified by primary
     /// key, and returns the stored result. Throws `HangarError.staleModel`
@@ -706,22 +761,22 @@ public struct Repo: Sendable {
     /// Through the diagnostics logger, so it is not lost on a repo built
     /// without one — which is every repo `withRepo` constructs.
     ///
-    /// The server's `DETAIL` is deliberately left out. For unique and
-    /// foreign-key violations it quotes the row — `Key (email)=(ada@…)` — and
-    /// an error-level line reaches every log sink an application has. The
-    /// column *names* it contains are kept; the values are not. The whole
-    /// server error is still on ``DatabaseError/underlying`` for code that
-    /// wants it on purpose.
+    /// Metadata only: SQLSTATE, kind, table, constraint and column *names*,
+    /// with the SQL as sent (placeholders, never values). The server's text
+    /// is left out — its detail quotes rows (`Key (email)=(ada@…)`), and its
+    /// primary message can too (`invalid input syntax for type integer:
+    /// "<the value>"`), as can a trigger's `RAISE` — while an error-level line
+    /// reaches every log sink an application has. It is all still on
+    /// ``DatabaseError/message`` and ``DatabaseError/underlying`` for code
+    /// that wants it on purpose.
     private func reportFailure(_ error: any Error, sql: String, operation: String) {
         guard let database = error as? DatabaseError else { return }
-        let server = database.underlying.serverInfo
         var metadata: Logger.Metadata = [
             "sql": .string(sql),
             "operation": .string(operation),
             "sqlstate": .string(database.sqlState),
-            "message": .string(database.message),
+            "kind": .string(database.kindName),
         ]
-        if let hint = server?[.hint] { metadata["hint"] = .string(hint) }
         if let table = database.table { metadata["table"] = .string(table) }
         if let constraint = database.constraint { metadata["constraint"] = .string(constraint) }
         if !database.columns.isEmpty {

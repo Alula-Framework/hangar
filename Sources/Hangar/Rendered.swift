@@ -100,9 +100,9 @@ extension Table {
 }
 
 extension Array where Element: Table {
-    /// The multi-row `INSERT ... VALUES (...), (...), ... RETURNING` a
-    /// batch `repo.insert(self)` renders to — one statement regardless of
-    /// how many elements.
+    /// The multi-row `INSERT ... VALUES (...), (...), ... RETURNING` for the
+    /// whole batch. `repo.insert(self)` sends exactly this unless the batch
+    /// exceeds the bind-parameter limit, when it sends it in chunks.
     public func debugInsertSQL() throws -> String {
         try SQLRenderer.insert(self).sql
     }

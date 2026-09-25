@@ -109,9 +109,10 @@ Post.select(into: PostWithCount.self) { post in
 ```
 
 The inner `where` may reference the outer row, like `exists()`. `scalarCount()`
-is non-optional (`count(*)` over no rows is 0); `scalar` is optional and takes
-`LIMIT 1`, because a subquery matching no row is NULL and one matching two is a
-runtime error.
+is non-optional (`count(*)` over no rows is 0); `scalar` is optional, because a
+subquery matching no row is NULL. It adds no `LIMIT`: a subquery matching two
+rows is Postgres's runtime error, and usually a uniqueness assumption that does
+not hold — `scalarFirst` takes `LIMIT 1` when any match will do.
 
 **Set operations** — `union`, `unionAll`, `intersect`, `except` between two
 queries over the same entity:

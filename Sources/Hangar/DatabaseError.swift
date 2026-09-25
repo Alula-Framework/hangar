@@ -20,13 +20,13 @@ import PostgresNIO
 ///
 /// **It is safe to log.** `PSQLError` redacts its description, so a logged
 /// failure reads as a generic placeholder. The opposite mistake is just as
-/// easy: the server's `DETAIL` field for a unique or foreign-key violation
-/// quotes the offending row — `Key (email)=(ada@example.com) already
-/// exists` — and logging it writes personal data into every log sink.
-/// `description` here carries the kind, SQLSTATE, table, constraint, column
-/// *names* and the server's primary message, which never contains values.
-/// The full server error, detail included, stays reachable as ``underlying``
-/// for the code that deliberately wants it.
+/// easy: the server's text quotes data. The detail of a unique violation
+/// quotes the row (`Key (email)=(ada@example.com) already exists`), the
+/// primary message of a bad cast quotes the value (`invalid input syntax for
+/// type integer: "…"`), and a trigger's `RAISE` can say anything.
+/// `description` is therefore metadata only — kind, SQLSTATE, table,
+/// constraint and column *names*. The server's words stay reachable as
+/// ``message`` and ``underlying`` for code that deliberately wants them.
 public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     /// The classes of server error Hangar distinguishes.
     public enum Kind: Sendable, Equatable {
@@ -64,8 +64,9 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     public let kind: Kind
     /// The five-character SQLSTATE, e.g. `"23505"`.
     public let sqlState: String
-    /// The server's primary message. Postgres keeps row values out of it;
-    /// they live in the detail, which is only on ``underlying``.
+    /// The server's primary message. **May contain data**: a failed cast
+    /// quotes the value (`invalid input syntax for type integer: "…"`), and a
+    /// trigger's `RAISE` can say anything. Not part of ``description``.
     public let message: String
     /// The table the error concerns, when the server names one.
     public let table: String?
@@ -120,7 +121,7 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         if !columns.isEmpty {
             parts.append("column\(columns.count == 1 ? "" : "s") \(columns.map { "\"\($0)\"" }.joined(separator: ", "))")
         }
-        return parts.joined(separator: ", ") + (message.isEmpty ? "" : ": \(message)")
+        return parts.joined(separator: ", ")
     }
 
     static func kind(for sqlState: String) -> Kind {
@@ -139,6 +140,9 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         default: .other
         }
     }
+
+    /// The kind in words, e.g. `unique violation`.
+    public var kindName: String { Self.name(of: kind) }
 
     private static func name(of kind: Kind) -> String {
         switch kind {

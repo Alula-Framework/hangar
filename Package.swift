@@ -35,13 +35,13 @@ let package = Package(
         // Changeset/ValidatedChanges/TableModel — the Alula-independent
         // validation + dirty-tracking layer. Extracted from
         // alula-data-core precisely so Hangar could consume it.
-        // Pinned to 0.1.x explicitly: SwiftPM's `from:` means "up to next
-        // major" even for a 0.x version, so `from: "0.1.0"` silently picked
-        // up 0.2.0 the moment it was published — a breaking release
-        // (`ValidatedChanges.init` gained a required `tableName`) that broke
-        // every fresh CI checkout because this repo has no committed
-        // Package.resolved to hold a version back. Bump this deliberately,
-        // together with the source changes 0.2.0's new API needs.
+        // Pinned to one minor version (0.2.x) explicitly: SwiftPM's `from:`
+        // means "up to next major" even for a 0.x version, so `from: "0.1.0"`
+        // once silently picked up 0.2.0 the moment it was published — a
+        // breaking release (`ValidatedChanges.init` gained a required
+        // `tableName`) that broke every fresh CI checkout, because this repo
+        // has no committed Package.resolved to hold a version back. Bump the
+        // minor deliberately, together with whatever source changes it needs.
         .package(url: "https://github.com/Alula-Framework/swift-changeset.git", .upToNextMinor(from: "0.2.0")),
         // swift-syntax bumps its major with each Swift release; the open
         // range is the community convention for macro packages.

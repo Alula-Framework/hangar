@@ -4,6 +4,42 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-09-25
+
+An external audit of 0.10.0 found three problems; each is fixed and pinned
+by tests.
+
+### Fixed
+
+- **Chunking no longer changes what a bulk `DO UPDATE` means.** In one
+  statement, two rows sharing a conflict key make Postgres refuse the upsert
+  (SQLSTATE 21000); split across statements — which 0.10.0 does past the
+  bind-parameter limit — each chunk updated the row and the batch
+  succeeded. The same input now gets the same answer at any size: repeated
+  keys are refused before anything is sent, and a split `DO UPDATE` whose
+  keys cannot be checked (a constraint-named target, a non-`Hashable` key)
+  is refused rather than split on faith. A differential property runs every
+  generated batch whole and force-split and requires identical results.
+- **`DatabaseError`'s description and the failure log are metadata only.**
+  0.10.0 dropped the server's detail but kept its primary message, which
+  can quote data too — `invalid input syntax for type integer: "…"`, or
+  anything a trigger `RAISE`s. The description is now kind, SQLSTATE,
+  table, constraint and column names; `message` and `underlying` keep the
+  server's words for code that wants them. The log also drops the hint.
+- **`Page.pageCount` uses integer arithmetic**; it went through `Double`,
+  which stops representing every integer at 2^53.
+
+### Documentation
+
+- `repo.insert(models)` is documented as usually one statement, split into
+  several inside one transaction past the bind limit — which matters for
+  statement-level triggers. The README no longer claims `scalar` adds
+  `LIMIT 1` (it deliberately does not; `scalarFirst` does).
+
+### Added
+
+- `DatabaseError.kindName`.
+
 ## [0.10.0] - 2026-09-24
 
 A Postgres audit of Hangar against the bugs, pull requests and tests of

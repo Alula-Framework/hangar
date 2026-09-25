@@ -233,7 +233,8 @@ enum SQLRenderer {
     }
 
     /// `INSERT INTO t (cols) VALUES (...), (...), ... RETURNING cols` —
-    /// every model in one statement, one round trip.
+    /// every model in one statement. `Repo.insert` chunks past the
+    /// bind-parameter limit; this renders whatever it is given.
     static func insert<M: Table>(_ models: [M], onConflict: OnConflict<M>? = nil) throws -> RenderedStatement {
         let schema = M.schema
         let columns = schema.insertable

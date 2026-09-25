@@ -22,7 +22,9 @@ public struct Page<Element: Sendable>: Sendable {
     }
 
     public var pageCount: Int {
-        total <= 0 ? 0 : Int((Double(total) / Double(perPage)).rounded(.up))
+        // Integer arithmetic: a Double stops representing every integer at
+        // 2^53, and `total` is an Int.
+        total <= 0 ? 0 : total / perPage + (total % perPage == 0 ? 0 : 1)
     }
     public var isFirst: Bool { page <= 1 }
     public var isLast: Bool { page >= pageCount }
