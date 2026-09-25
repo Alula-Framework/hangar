@@ -60,10 +60,11 @@ public enum FrameStart: Sendable {
     @available(
         *, unavailable,
         message: """
-            A frame cannot start at UNBOUNDED FOLLOWING — Postgres rejects it with
+            [HGR-QUERY-4003] A frame cannot start at UNBOUNDED FOLLOWING — Postgres rejects it with
             "frame start cannot be UNBOUNDED FOLLOWING". A frame starts at or before
             it ends: use .unboundedPreceding, .preceding(n), .currentRow or
             .following(n), and put UNBOUNDED FOLLOWING on the `to:` side.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4003.md
             """
     )
     public static var unboundedFollowing: FrameStart { fatalError("unavailable") }
@@ -91,10 +92,11 @@ public enum FrameEnd: Sendable {
     @available(
         *, unavailable,
         message: """
-            A frame cannot end at UNBOUNDED PRECEDING — Postgres rejects it with
+            [HGR-QUERY-4003] A frame cannot end at UNBOUNDED PRECEDING — Postgres rejects it with
             "frame end cannot be UNBOUNDED PRECEDING". A frame ends at or after it
             starts: use .preceding(n), .currentRow, .following(n) or
             .unboundedFollowing, and put UNBOUNDED PRECEDING on the `from:` side.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4003.md
             """
     )
     public static var unboundedPreceding: FrameEnd { fatalError("unavailable") }
@@ -319,10 +321,11 @@ public struct WindowExpression<Value>: Sendable, Selectable {
 @available(
     *, unavailable,
     message: """
-        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        [HGR-QUERY-4002] Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
         A window is computed after those clauses have already chosen the rows, so it
         cannot decide which rows they choose. Select it here, put this query in a CTE
         with `.with(...)`, and compare the column in the outer query.
+        See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4002.md
         """
 )
 public func > <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
@@ -330,10 +333,11 @@ public func > <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() 
 @available(
     *, unavailable,
     message: """
-        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        [HGR-QUERY-4002] Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
         A window is computed after those clauses have already chosen the rows, so it
         cannot decide which rows they choose. Select it here, put this query in a CTE
         with `.with(...)`, and compare the column in the outer query.
+        See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4002.md
         """
 )
 public func >= <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
@@ -341,10 +345,11 @@ public func >= <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError()
 @available(
     *, unavailable,
     message: """
-        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        [HGR-QUERY-4002] Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
         A window is computed after those clauses have already chosen the rows, so it
         cannot decide which rows they choose. Select it here, put this query in a CTE
         with `.with(...)`, and compare the column in the outer query.
+        See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4002.md
         """
 )
 public func < <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
@@ -352,10 +357,11 @@ public func < <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() 
 @available(
     *, unavailable,
     message: """
-        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        [HGR-QUERY-4002] Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
         A window is computed after those clauses have already chosen the rows, so it
         cannot decide which rows they choose. Select it here, put this query in a CTE
         with `.with(...)`, and compare the column in the outer query.
+        See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4002.md
         """
 )
 public func <= <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }
@@ -363,10 +369,11 @@ public func <= <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError()
 @available(
     *, unavailable,
     message: """
-        Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
+        [HGR-QUERY-4002] Window functions are not allowed in WHERE or HAVING — Postgres rejects this.
         A window is computed after those clauses have already chosen the rows, so it
         cannot decide which rows they choose. Select it here, put this query in a CTE
         with `.with(...)`, and compare the column in the outer query.
+        See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4002.md
         """
 )
 public func == <V>(lhs: WindowExpression<V>, rhs: V) -> Predicate { fatalError() }

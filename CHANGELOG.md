@@ -4,6 +4,23 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-09-25
+
+### Changed
+
+- **Query compile errors carry codes and pages.** The four mistakes Hangar
+  turns into build errors — an aggregate in WHERE, a window function in a
+  filter, a frame bound pointing the wrong way, fetching a grouped query as
+  whole rows — now read `[HGR-QUERY-4001]` to `[HGR-QUERY-4004]` and end with
+  a link to their page in `Diagnostics/`. The codes are stable; search for
+  them. `CI/check-invalid-queries-fail.sh` fails if a declared code is never
+  produced or has no page.
+
+### Fixed
+
+- The grouped-fetch message printed long runs of spaces mid-sentence: its
+  source lines had been joined rather than wrapped.
+
 ## [0.10.1] - 2026-09-25
 
 An external audit of 0.10.0 found three problems; each is fixed and pinned

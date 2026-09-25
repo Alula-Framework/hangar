@@ -480,20 +480,20 @@ now, each naming the rule it breaks and the fix:
 
 ```swift
 Post.where { $0.viewCount.sum() > 5 }
-// error: 'where' is unavailable: Aggregate functions are not allowed in WHERE
+// error: 'where' is unavailable: [HGR-QUERY-4001] Aggregate functions are not allowed in WHERE
 // — Postgres rejects this. WHERE chooses the rows that feed the aggregate, so
 // it cannot also read it. Group the rows and use HAVING instead:
 // `.groupBy { $0.someColumn }.having { ... }`.
 
 try await repo.all(Post.groupBy { $0.authorID })
-// error: 'all' is unavailable: A grouped query has no whole rows to fetch —
+// error: 'all' is unavailable: [HGR-QUERY-4004] A grouped query has no whole rows to fetch —
 // GROUP BY collapses them, and Postgres answers "column ... must appear in the
 // GROUP BY clause or be used in an aggregate function". Choose the columns
 // instead: `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`,
 // or ask about the groups with `count` / `exists`.
 
 Post.all.groupBy { $0.authorID }.having { $0.viewCount.sum().over() > 5 }
-// error: '>' is unavailable: Window functions are not allowed in WHERE or
+// error: '>' is unavailable: [HGR-QUERY-4002] Window functions are not allowed in WHERE or
 // HAVING — Postgres rejects this. A window is computed after those clauses
 // have already chosen the rows, so it cannot decide which rows they choose.
 // Select it here, put this query in a CTE with `.with(...)`, and compare the
@@ -508,6 +508,11 @@ compiler explains rather than saying "binary operator cannot be applied".
 `CI/check-invalid-queries-fail.sh` compiles a package of these queries on every
 push and fails if any of them builds — a compile-time guarantee is exactly the
 kind of claim that rots silently when an overload is widened.
+
+Each error carries a stable code — `HGR-QUERY-4001` to `4004` — and a link to
+its page in [`Diagnostics/`](Diagnostics/), which says why Postgres refuses it
+and how to write the query instead. The same check fails if a code is declared
+but never produced, or has no page.
 
 ## Column types
 

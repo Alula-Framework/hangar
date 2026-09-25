@@ -137,7 +137,12 @@ public struct Repo: Sendable {
     @available(
         *, unavailable,
         message: """
-            A grouped query has no whole rows to fetch — GROUP BY collapses them, and             Postgres answers "column ... must appear in the GROUP BY clause or be used in             an aggregate function". Choose the columns instead:             `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`, or ask             about the groups with `count` / `exists`.
+            [HGR-QUERY-4004] A grouped query has no whole rows to fetch — GROUP BY collapses
+            them, and Postgres answers "column ... must appear in the GROUP BY clause or be
+            used in an aggregate function". Choose the columns instead:
+            `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`, or ask
+            about the groups with `count` / `exists`.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4004.md
             """
     )
     public func all<M: Table>(_ query: Query<M, Grouped<M>>) async throws -> [M] {
@@ -176,7 +181,12 @@ public struct Repo: Sendable {
     @available(
         *, unavailable,
         message: """
-            A grouped query has no whole rows to fetch — GROUP BY collapses them, and             Postgres answers "column ... must appear in the GROUP BY clause or be used in             an aggregate function". Choose the columns instead:             `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`, or ask             about the groups with `count` / `exists`.
+            [HGR-QUERY-4004] A grouped query has no whole rows to fetch — GROUP BY collapses
+            them, and Postgres answers "column ... must appear in the GROUP BY clause or be
+            used in an aggregate function". Choose the columns instead:
+            `.select(into: Summary.self) { ($0.someColumn, $0.other.count()) }`, or ask
+            about the groups with `count` / `exists`.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4004.md
             """
     )
     public func one<M: Table>(_ query: Query<M, Grouped<M>>) async throws -> M? {

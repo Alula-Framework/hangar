@@ -76,9 +76,10 @@ extension Table {
     @available(
         *, unavailable,
         message: """
-            Aggregate functions are not allowed in WHERE — Postgres rejects this. WHERE
+            [HGR-QUERY-4001] Aggregate functions are not allowed in WHERE — Postgres rejects this. WHERE
             chooses the rows that feed the aggregate, so it cannot also read it. Group the
             rows and use HAVING instead: `.groupBy { $0.someColumn }.having { ... }`.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4001.md
             """
     )
     public static func `where`(
@@ -146,9 +147,10 @@ extension Query {
     @available(
         *, unavailable,
         message: """
-            Aggregate functions are not allowed in WHERE — Postgres rejects this. WHERE
+            [HGR-QUERY-4001] Aggregate functions are not allowed in WHERE — Postgres rejects this. WHERE
             chooses the rows that feed the aggregate, so it cannot also read it. Group the
             rows and use HAVING instead: `.groupBy { $0.someColumn }.having { ... }`.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4001.md
             """
     )
     public func `where`(
