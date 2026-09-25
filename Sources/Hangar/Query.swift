@@ -15,6 +15,10 @@ public struct Query<Model: Table, Result: Sendable>: Sendable {
     /// "posts"`. Set by the set operations, which have no name to give the
     /// combination and no need for one — see `SetOperation.swift`.
     var fromDerived: (@Sendable (inout BindWriter) -> String)?
+    /// A branch of this set operation carried a row lock, which Postgres
+    /// refuses; reported as ``HangarError/rowLockOnSetOperation`` when the
+    /// query runs (see `SetOperation.swift`).
+    var lockedSetOperationBranch = false
     /// GROUP BY expressions and the HAVING predicate.
     var grouping: [SQLExpression] = []
     var having: Predicate?
@@ -56,6 +60,7 @@ public struct Query<Model: Table, Result: Sendable>: Sendable {
         next.ctes = ctes
         next.fromCTE = fromCTE
         next.fromDerived = fromDerived
+        next.lockedSetOperationBranch = lockedSetOperationBranch
         next.selection = selection
         return next
     }
@@ -271,6 +276,7 @@ extension Query {
         next.ctes = ctes
         next.fromCTE = fromCTE
         next.fromDerived = fromDerived
+        next.lockedSetOperationBranch = lockedSetOperationBranch
         return next
     }
 

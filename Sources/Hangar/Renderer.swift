@@ -7,12 +7,17 @@ import PostgresNIO
 struct RenderedStatement {
     var sql: String
     var binds: [SQLBind]
+    /// A problem found while rendering that Postgres would reject; thrown
+    /// by ``postgresQuery()``, which every execution goes through, so the
+    /// builders that render can stay non-throwing.
+    var invalid: HangarError? = nil
 }
 
 extension RenderedStatement {
     /// The PostgresNIO query, with every bind applied. Throwing binds
     /// (JSONB encoding) surface here — before anything reaches the wire.
     func postgresQuery() throws -> PostgresQuery {
+        if let invalid { throw invalid }
         var bindings = PostgresBindings(capacity: binds.count)
         for bind in binds {
             try bind.apply(&bindings)
@@ -54,7 +59,11 @@ enum SQLRenderer {
     static func select<M, R>(_ query: Query<M, R>) -> RenderedStatement {
         var writer = BindWriter()
         let sql = selectText(query, writer: &writer)
-        return RenderedStatement(sql: sql, binds: writer.binds)
+        var statement = RenderedStatement(sql: sql, binds: writer.binds)
+        if query.lockedSetOperationBranch || (query.fromDerived != nil && query.rowLock != nil) {
+            statement.invalid = .rowLockOnSetOperation(table: M.schema.name)
+        }
+        return statement
     }
 
     /// The full SELECT statement text, appending binds to `writer` — the

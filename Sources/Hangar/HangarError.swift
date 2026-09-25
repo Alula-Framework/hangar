@@ -123,6 +123,14 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// target or nothing to set, or an index predicate without columns.
     case invalidConflictClause(table: String, reason: String)
 
+    /// `FOR UPDATE` or `FOR SHARE` on a `UNION`, `INTERSECT` or `EXCEPT`, or
+    /// on one of its branches. Postgres refuses both.
+    case rowLockOnSetOperation(table: String)
+
+    /// Hangar's code for ``rowLockOnSetOperation(table:)``, with a page in
+    /// Hangar's `Diagnostics/`.
+    static let rowLockOnSetOperationCode = "HGR-QUERY-4005"
+
     /// Every message names the fix, not just the problem — someone is
     /// usually reading it during an incident.
     public var description: String {
@@ -199,6 +207,9 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
                 "Internal error: entity \"\(table)\" has no binding for column \"\(column)\". This is a Hangar bug."
         case .invalidConflictClause(let table, let reason):
             return "ON CONFLICT on \"\(table)\": \(reason)."
+        case .rowLockOnSetOperation(let table):
+            return
+                "[\(Self.rowLockOnSetOperationCode)] A row lock on \"\(table)\" was combined with UNION, INTERSECT or EXCEPT, which Postgres refuses (\"FOR UPDATE is not allowed with UNION/INTERSECT/EXCEPT\"). Lock the rows in a separate statement in the same transaction — select their ids with the lock, then run the combined query. See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/\(Self.rowLockOnSetOperationCode).md"
         }
     }
 }

@@ -42,15 +42,23 @@ PHRASES
 # checks. The page is where the message's link points.
 cd ../..
 declared=$(grep -rhoE '\[HGR-QUERY-[0-9]{4}\]' Sources | tr -d '[]' | sort -u)
+# Codes reported when a query runs rather than when it compiles — held as a
+# quoted constant, since the message interpolates it. Proven by a test
+# asserting the code, not by this build.
+runtime=$(grep -rhoE '"HGR-QUERY-[0-9]{4}"' Sources | tr -d '"' | sort -u)
 pages=$(ls Diagnostics | sed -n 's/\.md$//p' | sort -u)
+for code in $runtime; do
+  [ -f "Diagnostics/$code.md" ] || { echo "::error::$code has no page in Diagnostics/"; missing=1; }
+  grep -rqF "$code" Tests || { echo "::error::$code is reported at runtime but no test asserts it"; missing=1; }
+done
 for code in $declared; do
   grep -qF "[$code]" <<< "$output" || { echo "::error::$code is declared but the invalid-queries build never produced it"; missing=1; }
   [ -f "Diagnostics/$code.md" ] || { echo "::error::$code has no page in Diagnostics/"; missing=1; }
 done
 for page in $pages; do
-  grep -qx "$page" <<< "$declared" || { echo "::error::Diagnostics/$page.md is for a code no source declares"; missing=1; }
+  grep -qx "$page" <<< "$declared"$'\n'"$runtime" || { echo "::error::Diagnostics/$page.md is for a code no source declares"; missing=1; }
 done
-covered=$(echo "$declared" | grep -c . || true)
+covered=$(printf '%s\n%s\n' "$declared" "$runtime" | grep -c . || true)
 
 if [ $missing -ne 0 ]; then
   echo "--- build output ---"

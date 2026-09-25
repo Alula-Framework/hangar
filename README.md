@@ -514,6 +514,11 @@ its page in [`Diagnostics/`](Diagnostics/), which says why Postgres refuses it
 and how to write the query instead. The same check fails if a code is declared
 but never produced, or has no page.
 
+One mistake cannot be a build error without splitting every query type in
+two: a row lock combined with `UNION`, `INTERSECT` or `EXCEPT`. Running such a
+query throws `HangarError.rowLockOnSetOperation` — `HGR-QUERY-4005` — before
+anything is sent.
+
 ## Column types
 
 | Postgres | Swift |

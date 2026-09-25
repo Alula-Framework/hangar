@@ -24,6 +24,39 @@ struct SetOperationSafetyTests {
         #expect(throws: HangarError.self) { try combined.debugDeleteSQL() }
     }
 
+    /// Locking a branch used to be a precondition failure, which took the
+    /// whole process down on the request that built the query. Both
+    /// placements are now an error thrown before anything is sent.
+    @Test("a row lock on a combination or on its branch throws HGR-QUERY-4005, rather than trapping", arguments: [
+        "branch", "outer", "nested",
+    ])
+    func rowLockIsRefused(_ placement: String) throws {
+        let locked = Post.where { $0.viewCount > 9_000 }.lockForUpdate()
+        let plain = Post.where { $0.published == false }
+        let query: Query<Post, Post>
+        switch placement {
+        case "branch": query = locked.union(plain)
+        case "outer": query = combined.lockForUpdate()
+        default: query = locked.union(plain).union(Post.where { $0.viewCount < 10 })
+        }
+        do {
+            _ = try SQLRenderer.select(query).postgresQuery()
+            Issue.record("a locked set operation rendered")
+        } catch let error as HangarError {
+            guard case .rowLockOnSetOperation = error else {
+                Issue.record("unexpected \(error)")
+                return
+            }
+            #expect(error.description.hasPrefix("[HGR-QUERY-4005]"))
+        }
+    }
+
+    @Test("a combination without a lock still renders")
+    func unlockedStillRenders() throws {
+        _ = try SQLRenderer.select(combined).postgresQuery()
+        _ = try SQLRenderer.select(Post.where { $0.viewCount > 1 }.lockForUpdate()).postgresQuery()
+    }
+
     @Test("a bulk update over a combination is refused too")
     func updateIsRefused() {
         #expect(throws: HangarError.self) {
