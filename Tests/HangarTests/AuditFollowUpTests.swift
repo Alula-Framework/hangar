@@ -137,6 +137,25 @@ extension PostgresIntegrationSuite {
             #expect(Repo.failureLevel(sqlState: "22P02") == .error)
         }
 
+        /// Relay #17: "database error (SQLSTATE 42703)" did not say which
+        /// column. A statement's own error names only what the SQL names.
+        @Test("an error about the statement itself carries the server's message")
+        func statementErrorsSayWhat() async throws {
+            let recorder = LogRecorder()
+            let logger = Logger(label: "test") { _ in RecordingLogHandler(recorder: recorder) }
+            try await withRepo(logger: logger, diagnostics: QueryDiagnostics()) { repo in
+                do {
+                    _ = try await repo.execute("SELECT nmae FROM pg_class").collect()
+                    Issue.record("an undefined column should fail")
+                } catch let error as DatabaseError {
+                    #expect(error.sqlState == "42703")
+                    #expect("\(error)".contains("column \"nmae\" does not exist"), "\(error)")
+                }
+            }
+            let failure = try #require(recorder.snapshot().first { $0.message == "hangar statement failed" })
+            #expect("\(failure.metadata["message"] ?? "")".contains("nmae"))
+        }
+
         @Test("a server message that quotes data stays out of the description and the log")
         func messagesNotLogged() async throws {
             let recorder = LogRecorder()

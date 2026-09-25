@@ -25,8 +25,10 @@ import PostgresNIO
 /// primary message of a bad cast quotes the value (`invalid input syntax for
 /// type integer: "…"`), and a trigger's `RAISE` can say anything.
 /// `description` is therefore metadata only — kind, SQLSTATE, table,
-/// constraint and column *names*. The server's words stay reachable as
-/// ``message`` and ``underlying`` for code that deliberately wants them.
+/// constraint and column *names* — except for an error about the statement
+/// itself (class 42, class 0A), whose message names only what the SQL names.
+/// The server's words stay reachable as ``message`` and ``underlying`` for
+/// code that deliberately wants them.
 public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     /// The classes of server error Hangar distinguishes.
     public enum Kind: Sendable, Equatable {
@@ -66,7 +68,8 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     public let sqlState: String
     /// The server's primary message. **May contain data**: a failed cast
     /// quotes the value (`invalid input syntax for type integer: "…"`), and a
-    /// trigger's `RAISE` can say anything. Not part of ``description``.
+    /// trigger's `RAISE` can say anything. Part of ``description`` only for
+    /// class 42 and 0A, which are about the statement's own text.
     public let message: String
     /// The table the error concerns, when the server names one.
     public let table: String?
@@ -116,6 +119,7 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
 
     public var description: String {
         var parts = ["\(Self.name(of: kind)) (SQLSTATE \(sqlState))"]
+        if let statementMessage { parts[0] += ": \(statementMessage)" }
         if let table { parts.append("table \"\(table)\"") }
         if let constraint { parts.append("constraint \"\(constraint)\"") }
         if !columns.isEmpty {
@@ -139,6 +143,19 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         case "25P02": .transactionAborted
         default: .other
         }
+    }
+
+    /// The server's message, when the error is about the statement itself.
+    ///
+    /// Class 42 (a syntax error, an undefined column, function or table) and
+    /// class 0A (a feature not supported) describe the SQL the programmer
+    /// wrote, and "SQLSTATE 42703" without "column \"nmae\" does not exist" is
+    /// an error nobody can act on (Relay #17). The message can name only what
+    /// the statement names — and the statement's text is already in the
+    /// failure log — so it is included for these classes and no others.
+    var statementMessage: String? {
+        guard sqlState.hasPrefix("42") || sqlState.hasPrefix("0A"), !message.isEmpty else { return nil }
+        return message
     }
 
     /// The kind in words, e.g. `unique violation`.

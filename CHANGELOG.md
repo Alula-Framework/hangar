@@ -4,6 +4,19 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-09-25
+
+### Changed
+
+- **An error about the statement itself says what is wrong.** A syntax error
+  or an undefined column, function or table (SQLSTATE class 42), or a
+  feature not supported (0A), described itself as `database error (SQLSTATE
+  42703)` — not which column (Relay #17). For those classes the server's
+  message is now part of `DatabaseError.description` and of the failure log:
+  `database error (SQLSTATE 42703): column "nmae" does not exist`. It names
+  only what the statement names, and the statement is already in the log.
+  Every other class stays metadata only.
+
 ## [0.11.1] - 2026-09-25
 
 ### Changed
