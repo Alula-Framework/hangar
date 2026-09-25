@@ -192,7 +192,9 @@ extension PostgresIntegrationSuite {
             let failures = recorder.snapshot().filter { $0.message == "hangar statement failed" }
             #expect(failures.count == 1)
             for entry in failures {
-                #expect(entry.level == .error)
+                // A duplicate is the caller's to judge, so info rather than
+                // error (Relay #35).
+                #expect(entry.level == .info)
                 #expect(entry.metadata["sqlstate"] == "23505")
                 #expect(entry.metadata["columns"] == .array(["key"]))
                 #expect(!"\(entry.metadata)".contains("ada@example.com"))

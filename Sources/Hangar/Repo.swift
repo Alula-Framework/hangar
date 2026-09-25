@@ -804,7 +804,23 @@ public struct Repo: Sendable {
         if !database.columns.isEmpty {
             metadata["columns"] = .array(database.columns.map { .string($0) })
         }
-        diagnosticsLogger.error("hangar statement failed", metadata: metadata)
+        diagnosticsLogger.log(level: Self.failureLevel(sqlState: database.sqlState), "hangar statement failed", metadata: metadata)
+    }
+
+    /// How loudly a failure is reported, by what it means.
+    ///
+    /// Everything was `error`, which is the level an operator pages on — and
+    /// a taken email answered with a 409, the most ordinary flow there is,
+    /// looked like an incident (Relay #35). A constraint violation is how an
+    /// application enforces its invariants; the caller decides whether it
+    /// is an error, and says so if it is. A serialization failure or a
+    /// deadlock has a documented remedy — run it again — which the
+    /// transaction retry does. The rest stays an error: a missing table, a
+    /// syntax error, a cast that failed.
+    static func failureLevel(sqlState: String) -> Logger.Level {
+        if sqlState.hasPrefix("23") { return .info }
+        if sqlState == "40001" || sqlState == "40P01" { return .notice }
+        return .error
     }
 
     private func nanoseconds(of duration: Duration) -> Int64 {

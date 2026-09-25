@@ -106,6 +106,37 @@ extension PostgresIntegrationSuite {
             }
         }
 
+        /// Relay #35: a unique violation the application answers with a 409
+        /// was logged at `error`, the level an operator pages on.
+        @Test("a constraint violation is logged at info; a broken statement stays an error")
+        func failureLevels() async throws {
+            let recorder = LogRecorder()
+            let logger = Logger(label: "test") { _ in RecordingLogHandler(recorder: recorder) }
+            try await withRepo(logger: logger, diagnostics: QueryDiagnostics()) { repo in
+                _ = try await repo.execute(
+                    "CREATE TEMP TABLE level_probe (slug text PRIMARY KEY)").collect()
+                _ = try await repo.execute("INSERT INTO level_probe VALUES ('taken')").collect()
+                await #expect(throws: DatabaseError.self) {
+                    _ = try await repo.execute("INSERT INTO level_probe VALUES ('taken')").collect()
+                }
+                await #expect(throws: DatabaseError.self) {
+                    _ = try await repo.execute("SELEC 1").collect()
+                }
+            }
+            let failures = recorder.snapshot().filter { $0.message == "hangar statement failed" }
+            #expect(failures.map(\.level) == [.info, .error])
+        }
+
+        @Test("retryable failures are a notice, since running them again is the remedy")
+        func retryableLevel() {
+            #expect(Repo.failureLevel(sqlState: "40001") == .notice)
+            #expect(Repo.failureLevel(sqlState: "40P01") == .notice)
+            #expect(Repo.failureLevel(sqlState: "23503") == .info)
+            #expect(Repo.failureLevel(sqlState: "23P01") == .info)
+            #expect(Repo.failureLevel(sqlState: "42P01") == .error)
+            #expect(Repo.failureLevel(sqlState: "22P02") == .error)
+        }
+
         @Test("a server message that quotes data stays out of the description and the log")
         func messagesNotLogged() async throws {
             let recorder = LogRecorder()
