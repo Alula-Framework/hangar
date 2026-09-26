@@ -131,6 +131,38 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// Hangar's `Diagnostics/`.
     static let rowLockOnSetOperationCode = "HGR-QUERY-4005"
 
+    /// The diagnostic code for this error, when it has one: a page in
+    /// Hangar's `Diagnostics/` explains it, and `alula explain <code>` prints
+    /// that page. `nil` for internal invariants, which are Hangar's bugs, not
+    /// something to look up.
+    ///
+    /// Codes raised when a query runs are `HGR-QUERY-41xx`; the `40xx` codes
+    /// are build errors.
+    public var code: String? {
+        switch self {
+        case .transactionAborted: "HGR-QUERY-4101"
+        case .noAmbientRepo: "HGR-QUERY-4102"
+        case .tooManyRows: "HGR-QUERY-4103"
+        case .staleModel: "HGR-QUERY-4104"
+        case .notSoftDeletable: "HGR-QUERY-4105"
+        case .columnCountMismatch: "HGR-QUERY-4106"
+        case .columnDecoding: "HGR-QUERY-4107"
+        case .invalidEnumValue: "HGR-QUERY-4108"
+        case .notPreloaded: "HGR-QUERY-4109"
+        case .streamLeaseExpired: "HGR-QUERY-4110"
+        case .bulkWriteClause: "HGR-QUERY-4111"
+        case .unknownFilterField: "HGR-QUERY-4112"
+        case .invalidFilterValue: "HGR-QUERY-4113"
+        case .rowLockOnSetOperation: Self.rowLockOnSetOperationCode
+        default: nil
+        }
+    }
+
+    /// Where a code's page lives.
+    static func page(_ code: String) -> String {
+        "https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/\(code).md"
+    }
+
     /// Whether the error is about input the caller was given rather than
     /// about the code or the database: a dynamic filter naming a field
     /// outside the allowlist, or a value of the wrong shape. An HTTP layer
@@ -143,8 +175,14 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     }
 
     /// Every message names the fix, not just the problem — someone is
-    /// usually reading it during an incident.
+    /// usually reading it during an incident. A coded error leads with its
+    /// code and ends with its page.
     public var description: String {
+        guard let code else { return message }
+        return "[\(code)] \(message) See \(Self.page(code))"
+    }
+
+    private var message: String {
         switch self {
         case .transactionAborted(let cause):
             let why = cause.map { " The first statement to fail: \($0)." } ?? ""
@@ -220,7 +258,7 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
             return "ON CONFLICT on \"\(table)\": \(reason)."
         case .rowLockOnSetOperation(let table):
             return
-                "[\(Self.rowLockOnSetOperationCode)] A row lock on \"\(table)\" was combined with UNION, INTERSECT or EXCEPT, which Postgres refuses (\"FOR UPDATE is not allowed with UNION/INTERSECT/EXCEPT\"). Lock the rows in a separate statement in the same transaction — select their ids with the lock, then run the combined query. See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/\(Self.rowLockOnSetOperationCode).md"
+                "A row lock on \"\(table)\" was combined with UNION, INTERSECT or EXCEPT, which Postgres refuses (\"FOR UPDATE is not allowed with UNION/INTERSECT/EXCEPT\"). Lock the rows in a separate statement in the same transaction — select their ids with the lock, then run the combined query."
         }
     }
 }

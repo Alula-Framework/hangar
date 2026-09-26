@@ -4,6 +4,37 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-09-26
+
+Every error Hangar raises when a query runs now carries a code and a page.
+
+### Added
+
+- **Runtime codes.** `HangarError.code` is `HGR-QUERY-4101`–`4113` for the
+  errors worth looking up, and `4005` as before: transaction aborted, no
+  ambient repo, too many rows, stale model, not soft-deletable, column count
+  or decode mismatch, unknown enum value, not preloaded, stream outlived its
+  lease, bulk-write clause, unknown filter field, invalid filter value. The
+  description leads with the code and ends with the page's URL, the way
+  `HGR-QUERY-4005` did, so `alula explain HGR-QUERY-4104` prints the page.
+  Internal invariants (a Hangar bug) have no code. Each code has a page in
+  `Diagnostics/`, and CI fails if a code has no page or no test asserting it.
+- **An undefined column or table points at migrations.** A `DatabaseError`
+  with SQLSTATE 42703 or 42P01 has a `hint` —
+  `[HGR-QUERY-4114] if this column belongs to an @Entity, the database may be
+  behind the application's migrations — run them against this database` —
+  appended to its description and added to the failure log line as `hint`.
+- **`HGR-QUERY-4006`: a column that cannot be a dynamic filter is a build
+  error that says which types can**, and how to opt a `PostgresEnum` or any
+  other type in. Before this it read "initializer 'init(_:)' requires that
+  'Decimal' conform to 'DynamicFilterConvertible'".
+
+### Changed
+
+- `HangarError.description` for the coded cases now starts with `[HGR-QUERY-…]`
+  and ends with a URL. Code that matched these descriptions exactly should
+  match on the case or on `code` instead.
+
 ## [0.13.0] - 2026-09-26
 
 Reporting and bulk-update expressions from Relay's report queries.

@@ -135,6 +135,27 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         self.underlying = error
     }
 
+    /// What to check first, when the SQLSTATE suggests something specific.
+    ///
+    /// An undefined column (42703) or table (42P01) in an application's own
+    /// statements is almost never a typo that compiled: the entity names a
+    /// column the database does not have yet, because the migration that
+    /// adds it has not run there. That is the first thing to check, and the
+    /// error used to leave the reader to think of it.
+    public var hint: String? {
+        switch sqlState {
+        case "42703", "42P01":
+            let what = sqlState == "42703" ? "column" : "table"
+            return
+                "[\(Self.behindMigrationsCode)] if this \(what) belongs to an @Entity, the database may be behind the application's migrations — run them against this database. See \(HangarError.page(Self.behindMigrationsCode))"
+        default:
+            return nil
+        }
+    }
+
+    /// The code for ``hint`` on an undefined column or table.
+    static let behindMigrationsCode = "HGR-QUERY-4114"
+
     public var description: String {
         var parts = ["\(Self.name(of: kind)) (SQLSTATE \(sqlState))"]
         if let statementMessage { parts[0] += ": \(statementMessage)" }
@@ -143,7 +164,8 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         if !columns.isEmpty {
             parts.append("column\(columns.count == 1 ? "" : "s") \(columns.map { "\"\($0)\"" }.joined(separator: ", "))")
         }
-        return parts.joined(separator: ", ")
+        let described = parts.joined(separator: ", ")
+        return hint.map { "\(described) — \($0)" } ?? described
     }
 
     static func kind(for sqlState: String) -> Kind {

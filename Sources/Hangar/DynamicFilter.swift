@@ -193,6 +193,24 @@ public struct AnyColumn<M: Table>: Sendable {
         }
     }
 
+    /// Chosen only for a column whose type cannot be read from a filter
+    /// value, to say which types can and how to add one. Without it the
+    /// mistake reads "initializer 'init(_:)' requires that 'Decimal' conform
+    /// to 'DynamicFilterConvertible'" — true, and no help (Relay #16).
+    @available(
+        *, unavailable,
+        message: """
+            [HGR-QUERY-4006] This column's type cannot be a dynamic filter: Hangar has no way to read
+            it from a request's filter value. Filterable out of the box: String, Int, Int16, Int32,
+            Int64, Double, Bool, UUID and Date; a PostgresEnum opts in with
+            `extension MyEnum: DynamicFilterConvertible {}`. For any other type, conform it to
+            DynamicFilterConvertible and implement fromDynamicFilter(_:) — or leave the column out
+            of `filterable`.
+            See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4006.md
+            """
+    )
+    public init<V>(_ keyPath: KeyPath<M, V> & Sendable) { fatalError("unavailable") }
+
     /// Optional columns additionally accept `null`, which filters as
     /// `IS NULL` — never `= NULL`, which matches nothing.
     public init<V: DynamicFilterConvertible>(_ keyPath: KeyPath<M, V?> & Sendable) {

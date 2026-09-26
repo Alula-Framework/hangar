@@ -11,6 +11,7 @@ struct Widget {
     @ID var id: UUID
     var viewCount: Int
     var ownerID: UUID
+    var price: Decimal
 }
 
 // ERROR: aggregate functions are not allowed in WHERE
@@ -42,4 +43,9 @@ func frameStartsAtUnboundedFollowing() -> Window {
 // ERROR: frame end cannot be UNBOUNDED PRECEDING
 func frameEndsAtUnboundedPreceding() -> Window {
     Window().rows(from: .currentRow, to: .unboundedPreceding)
+}
+
+// ERROR: a column whose type cannot be read from a dynamic filter value
+func unfilterableColumn() -> AnyColumn<Widget> {
+    AnyColumn(\.price)
 }

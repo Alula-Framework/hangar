@@ -34,6 +34,7 @@ Window functions are not allowed in WHERE or HAVING
 A grouped query has no whole rows to fetch
 A frame cannot start at UNBOUNDED FOLLOWING
 A frame cannot end at UNBOUNDED PRECEDING
+This column's type cannot be a dynamic filter
 PHRASES
 
 # Every diagnostic code Hangar declares must be produced by this build and

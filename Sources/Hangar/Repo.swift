@@ -805,6 +805,7 @@ public struct Repo: Sendable {
             metadata["columns"] = .array(database.columns.map { .string($0) })
         }
         if let message = database.statementMessage { metadata["message"] = .string(message) }
+        if let hint = database.hint { metadata["hint"] = .string(hint) }
         diagnosticsLogger.log(level: Self.failureLevel(sqlState: database.sqlState), "hangar statement failed", metadata: metadata)
     }
 
