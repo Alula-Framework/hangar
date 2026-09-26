@@ -81,9 +81,27 @@ do {
 
 Its description never includes row values — the server's detail for a
 unique violation quotes the row, so it stays on
-``DatabaseError/underlying`` for code that wants it deliberately. Errors that
-never reached the server (a lost connection, a decoding failure) keep their
+``DatabaseError/underlying`` for code that wants it deliberately.
+
+A statement that never got an answer — the server refused the connection,
+the network dropped it, the pool was closed — is a
+``DatabaseConnectionError``, whose description says why:
+`could not connect to the database: connection refused (10.0.0.5:5432)`.
+Other client-side failures, such as a cell that does not decode, keep their
 own types.
+
+## Mapping failures to responses
+
+Three properties sort failures the way an HTTP layer answers them:
+
+- ``DatabaseError/isTransient`` and ``DatabaseConnectionError/isTransient``:
+  the same request can succeed later — a serialization failure, a deadlock,
+  a lock or statement timeout, a server short of connections or restarting,
+  an unreachable database. A 503.
+- ``HangarError/isClientInput``: a dynamic filter named a field outside the
+  allowlist or sent a value of the wrong type. A 400.
+- ``DatabaseError/isRetryable``: narrower than transient — the failures whose
+  documented remedy is running the transaction again at once.
 
 ## Binding a repo to a connection you own
 

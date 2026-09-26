@@ -131,6 +131,17 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// Hangar's `Diagnostics/`.
     static let rowLockOnSetOperationCode = "HGR-QUERY-4005"
 
+    /// Whether the error is about input the caller was given rather than
+    /// about the code or the database: a dynamic filter naming a field
+    /// outside the allowlist, or a value of the wrong shape. An HTTP layer
+    /// maps these to 400; every other case is the server's problem.
+    public var isClientInput: Bool {
+        switch self {
+        case .unknownFilterField, .invalidFilterValue: true
+        default: false
+        }
+    }
+
     /// Every message names the fix, not just the problem — someone is
     /// usually reading it during an incident.
     public var description: String {

@@ -82,6 +82,7 @@ just the problem, because someone is usually reading it during an incident.
 ### Errors
 
 - ``DatabaseError``
+- ``DatabaseConnectionError``
 - ``HangarError``
 - ``DatabaseRows``
 

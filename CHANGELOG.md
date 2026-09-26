@@ -4,6 +4,32 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-09-26
+
+### Added
+
+- **`DatabaseConnectionError`: a failure to reach the database says why.**
+  A refused, dropped or unauthenticatable connection, or a closed pool,
+  reached the caller as PostgresNIO's `PSQLError`, whose description is
+  deliberately opaque — so a queue worker logged "Generic description to
+  prevent accidental leakage…" for "could not claim jobs" (Relay #43). Hangar
+  now throws `DatabaseConnectionError` for these, with a `Kind`
+  (`unreachable`, `connectionLost`, `tls`, `authentication`, `closed`) and a
+  readable reason: `could not connect to the database: connection refused
+  (127.0.0.1:5432)`. It covers statements, row iteration, and the lease a
+  `transaction { }` takes. Code that caught `PSQLError` for these should
+  catch `DatabaseConnectionError`; the original is its `underlying`.
+- **Classification for mapping failures to responses.**
+  `DatabaseError.isTransient` and `DatabaseConnectionError.isTransient` are
+  true when the same request can succeed later (503): serialization failure,
+  deadlock, lock not available, statement timeout, a server short of
+  resources or restarting, an unreachable database.
+  `HangarError.isClientInput` is true for a dynamic filter's unknown field or
+  mistyped value (400).
+- **`Int16`, `Int32` and `Int64` are `DynamicFilterConvertible`** (Relay #16).
+  A value out of the column's range is `invalidFilterValue`, not a trap. An
+  application that declared these conformances itself must delete them.
+
 ## [0.11.2] - 2026-09-25
 
 ### Changed

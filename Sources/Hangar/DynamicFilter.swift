@@ -94,6 +94,34 @@ extension Int: DynamicFilterConvertible {
     }
 }
 
+// `smallint`, `integer` and `bigint` columns: an `.int` in range, and a
+// mismatch — not a trap — when it is out of range, so `severity=70000` on a
+// `smallint` is the filter error the caller sent, not a crash (Relay #16).
+
+extension Int16: DynamicFilterConvertible {
+    /// An `.int` that fits in `Int16`.
+    public static func fromDynamicFilter(_ value: DynamicFilterValue) -> Int16? {
+        if case .int(let int) = value { return Int16(exactly: int) }
+        return nil
+    }
+}
+
+extension Int32: DynamicFilterConvertible {
+    /// An `.int` that fits in `Int32`.
+    public static func fromDynamicFilter(_ value: DynamicFilterValue) -> Int32? {
+        if case .int(let int) = value { return Int32(exactly: int) }
+        return nil
+    }
+}
+
+extension Int64: DynamicFilterConvertible {
+    /// An `.int`, verbatim.
+    public static func fromDynamicFilter(_ value: DynamicFilterValue) -> Int64? {
+        if case .int(let int) = value { return Int64(exactly: int) }
+        return nil
+    }
+}
+
 extension Double: DynamicFilterConvertible {
     /// A `.double`, or an `.int` widened — JSON doesn't distinguish 3 from 3.0.
     public static func fromDynamicFilter(_ value: DynamicFilterValue) -> Double? {

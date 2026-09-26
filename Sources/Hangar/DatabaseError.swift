@@ -99,6 +99,24 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     /// transaction again is the documented remedy.
     public var isRetryable: Bool { kind == .serializationFailure || kind == .deadlock }
 
+    /// Whether the same request can succeed later without changing it — the
+    /// answer an HTTP layer maps to 503. True for everything ``isRetryable``
+    /// covers, plus a lock that was not available (55P03), a statement
+    /// timeout or cancellation (57014), a server short of resources (class
+    /// 53, including "too many connections"), a server shutting down or
+    /// starting up (57P01–57P03), and a connection failure the server
+    /// reported (class 08).
+    public var isTransient: Bool { Self.transient(sqlState: sqlState) }
+
+    static func transient(sqlState: String) -> Bool {
+        switch kind(for: sqlState) {
+        case .serializationFailure, .deadlock, .lockNotAvailable, .queryCanceled: return true
+        default:
+            return sqlState.hasPrefix("53") || sqlState.hasPrefix("08")
+                || ["57P01", "57P02", "57P03"].contains(sqlState)
+        }
+    }
+
     /// Classifies a server error. `nil` for errors that never reached the
     /// server (connection failures, client-side limits, decoding), which
     /// keep their own types.
@@ -235,8 +253,10 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     }
 }
 
-/// Wraps server errors as ``DatabaseError``; everything else passes through.
+/// Wraps server errors as ``DatabaseError`` and connection failures as
+/// ``DatabaseConnectionError``; everything else passes through.
 func translatingDatabaseErrors(_ error: any Error) -> any Error {
     if let psql = error as? PSQLError, let classified = DatabaseError(psql) { return classified }
+    if let connection = DatabaseConnectionError(error) { return connection }
     return error
 }

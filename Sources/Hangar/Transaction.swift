@@ -61,26 +61,34 @@ extension Repo {
             // here (rather than shared with the branch below) so `body` is
             // *called* inside the lease closure, never passed across it —
             // region isolation rejects the round trip.
-            return try await primary.withConnection { connection in
-                let control = TransactionControl(depth: 0, isolation: isolation, statementTimeout: statementTimeout)
-                let log = logger ?? Self.quietLogger
-                let ledger = TransactionLedger()
-                try await control.run(\.begin, on: connection, logger: log)
-                let tx = Repo(transaction: connection, depth: 1, ledger: ledger, logger: logger)
-                do {
-                    try await control.applySettings(on: connection, logger: log)
-                    let result = try await body(tx)
-                    try await control.finish(on: connection, ledger: ledger, logger: log)
-                    return result
-                } catch {
-                    // Roll back and surface the body's error. If the
-                    // rollback itself fails the connection is beyond saving
-                    // — the pool discards it, and the original error is
-                    // still the story.
-                    let surfaced = control.surface(error, ledger: ledger)
-                    await control.rollBack(on: connection, ledger: ledger, logger: log)
-                    throw surfaced
+            // A lease that fails — the database unreachable, the pool
+            // closed — is a connection failure, and says so. Everything the
+            // body throws was translated already; translating again is a
+            // no-op for it.
+            do {
+                return try await primary.withConnection { connection in
+                    let control = TransactionControl(depth: 0, isolation: isolation, statementTimeout: statementTimeout)
+                    let log = logger ?? Self.quietLogger
+                    let ledger = TransactionLedger()
+                    try await control.run(\.begin, on: connection, logger: log)
+                    let tx = Repo(transaction: connection, depth: 1, ledger: ledger, logger: logger)
+                    do {
+                        try await control.applySettings(on: connection, logger: log)
+                        let result = try await body(tx)
+                        try await control.finish(on: connection, ledger: ledger, logger: log)
+                        return result
+                    } catch {
+                        // Roll back and surface the body's error. If the
+                        // rollback itself fails the connection is beyond saving
+                        // — the pool discards it, and the original error is
+                        // still the story.
+                        let surfaced = control.surface(error, ledger: ledger)
+                        await control.rollBack(on: connection, ledger: ledger, logger: log)
+                        throw surfaced
+                    }
                 }
+            } catch {
+                throw translatingDatabaseErrors(error)
             }
         case .transaction(let connection, let depth):
             let control = TransactionControl(depth: depth, isolation: isolation, statementTimeout: statementTimeout)

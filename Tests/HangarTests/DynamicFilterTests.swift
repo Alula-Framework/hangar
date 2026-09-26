@@ -48,6 +48,18 @@ struct DynamicFilterTests {
         }
     }
 
+    @Test("smallint, integer and bigint columns filter; an out-of-range value is a mismatch")
+    func fixedWidthIntegers() throws {
+        let statement = SQLRenderer.select(
+            try TypeRow.where(dynamic: ["small": 3, "medium": 70_000, "large": 5_000_000_000]))
+        #expect(statement.sql.hasSuffix(
+            #"WHERE ((("large" = $1) AND ("medium" = $2)) AND ("small" = $3))"#))
+        #expect(throws: HangarError.self) { _ = try TypeRow.where(dynamic: ["small": 70_000]) }
+        #expect(throws: HangarError.self) { _ = try TypeRow.where(dynamic: ["medium": 5_000_000_000]) }
+        #expect(throws: HangarError.self) { _ = try TypeRow.where(dynamic: ["small": "3"]) }
+        #expect(Int16.fromDynamicFilter(.int(Int(Int16.min))) == .min)
+    }
+
     @Test("null filters optional columns as IS NULL; non-optional rejects it")
     func nullHandling() throws {
         let statement = SQLRenderer.select(try Post.where(dynamic: ["nickname": nil]))
@@ -121,4 +133,12 @@ struct SQLFragmentTests {
             Post.select { p in SQLFragment("char_length(\(p.title))").expression(as: Int.self) })
         #expect(statement.sql == #"SELECT (char_length("title")) FROM "hangar_posts""#)
     }
+}
+
+extension TypeRow: DynamicallyFilterable {
+    static let filterable: [String: AnyColumn<TypeRow>] = [
+        "small": .init(\.small),
+        "medium": .init(\.medium),
+        "large": .init(\.large),
+    ]
 }
