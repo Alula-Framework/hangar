@@ -50,6 +50,10 @@ public struct OrderTerm: Sendable {
     let column: String
     let direction: Direction
     var nulls: NullsPlacement?
+    /// Set when the term orders by an expression — an aggregate, a window
+    /// function, arithmetic — rather than a column; `table` and `column`
+    /// are then empty.
+    var expression: SQLExpression?
 
     /// Everything after the column name: `ASC`, or `DESC NULLS LAST`.
     ///
@@ -68,6 +72,13 @@ public struct OrderTerm: Sendable {
         self.column = column
         self.direction = direction
         self.nulls = nulls
+    }
+
+    init(expression: SQLExpression, direction: Direction) {
+        self.table = ""
+        self.column = ""
+        self.direction = direction
+        self.expression = expression
     }
 
     /// Sort NULLs before every non-NULL value.

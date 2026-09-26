@@ -113,6 +113,33 @@ extension PostgresIntegrationSuite {
             }
         }
 
+        @Test("an increment in SET is computed by the server: concurrent updates each add one")
+        func atomicIncrement() async throws {
+            try await UpsertIntegrationTests.withDocs { repo in
+                let doc = try await repo.insert(UpsertIntegrationTests.doc("a", 1))
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    for _ in 0..<20 {
+                        group.addTask {
+                            _ = try await repo.update(UpsertDoc.where { $0.id == doc.id }) {
+                                $0.version.set(to: $0.version.adding(1))
+                            }
+                        }
+                    }
+                    try await group.waitForAll()
+                }
+                #expect(try await repo.one(UpsertDoc.where { $0.id == doc.id })?.version == 21)
+
+                // Arithmetic across columns and in WHERE; the server's clock in SET.
+                let touched = try await repo.update(UpsertDoc.where { $0.version.multiplied(by: 2).subtracting(2) == 40 }) {
+                    ($0.version.set(to: $0.version.multiplied(by: $0.version)), $0.deletedAt.set(to: .transactionTimestamp))
+                }
+                #expect(touched == 1)
+                let row = try await repo.one(UpsertDoc.where { $0.id == doc.id })
+                #expect(row?.version == 441)
+                #expect(abs(row?.deletedAt?.timeIntervalSinceNow ?? .infinity) < 60)
+            }
+        }
+
         @Test("a two-connection pool serves many concurrent transactions without stalling")
         func smallPool() async throws {
             var configuration = try TestDatabase.clientConfiguration()

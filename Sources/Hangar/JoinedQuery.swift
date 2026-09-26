@@ -580,7 +580,7 @@ extension SQLRenderer {
         }
         if !query.orderings.isEmpty {
             let terms = query.orderings
-                .map { "\(quote($0.table)).\(quote($0.column)) \($0.clause)" }
+                .map { SQLRenderer.orderTerm($0, alwaysQualified: true, writer: &writer) }
                 .joined(separator: ", ")
             sql += " ORDER BY \(terms)"
         }

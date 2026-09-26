@@ -55,6 +55,12 @@ indirect enum SQLExpression: Sendable {
     case fragment([SQLFragment.Part])
     /// `NOT (operand)`
     case not(SQLExpression)
+    /// `aggregate FILTER (WHERE condition)`: an aggregate over only the rows
+    /// the condition admits.
+    case aggregateFilter(SQLExpression, SQLExpression)
+    /// `name(args) WITHIN GROUP (ORDER BY operand)`: an ordered-set
+    /// aggregate such as `percentile_cont`.
+    case withinGroup(String, [SQLExpression], SQLExpression)
     case isNull(SQLExpression)
     case isNotNull(SQLExpression)
 }

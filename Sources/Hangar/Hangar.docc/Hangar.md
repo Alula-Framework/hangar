@@ -67,6 +67,16 @@ just the problem, because someone is usually reading it during an incident.
 - ``Predicate``
 - ``DeletedRowScope``
 - ``DynamicFilterValue``
+- ``CombinedQuery``
+
+### Expressions
+
+- ``ColumnExpression``
+- ``RowValue``
+- ``SQLArithmetic``
+- ``TimestampUnit``
+- ``SQLTimestamp``
+- ``SQLNumeric``
 
 ### Running them
 

@@ -259,7 +259,7 @@ extension Query {
     /// Carries every clause across the `Result` change. There is no selection
     /// to carry: `groupBy` is only available before one is set, which is what
     /// keeps this from dropping a projection silently.
-    private func retypedForGrouping(adding expression: SQLExpression)
+    func retypedForGrouping(adding expression: SQLExpression)
         -> Query<Model, Grouped<Model>>
     {
         var next = Query<Model, Grouped<Model>>()

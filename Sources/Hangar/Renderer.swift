@@ -99,7 +99,12 @@ enum SQLRenderer {
         }
         if !query.orderings.isEmpty {
             let terms = query.orderings
-                .map { "\(quote($0.column)) \($0.clause)" }
+                .map { term -> String in
+                    // Single-table scope: a column stays bare even when the
+                    // writer is qualified for a correlated subquery, as before.
+                    term.expression == nil
+                        ? "\(quote(term.column)) \(term.clause)" : orderTerm(term, writer: &writer)
+                }
                 .joined(separator: ", ")
             sql += " ORDER BY \(terms)"
         }
@@ -612,6 +617,20 @@ enum SQLRenderer {
         return text
     }
 
+    /// One ORDER BY term. A column renders as the caller's scope requires —
+    /// `alwaysQualified` for the join renderers, which qualify every column
+    /// whatever the writer says; an expression renders through the writer.
+    static func orderTerm(
+        _ term: OrderTerm, alwaysQualified: Bool = false, writer: inout BindWriter
+    ) -> String {
+        if let expression = term.expression {
+            return "\(render(expression, writer: &writer)) \(term.clause)"
+        }
+        let qualify = (alwaysQualified || writer.qualified) && !term.table.isEmpty
+        let column = qualify ? "\(quote(term.table)).\(quote(term.column))" : quote(term.column)
+        return "\(column) \(term.clause)"
+    }
+
     static func appendWhere(_ predicate: Predicate?, to sql: inout String, writer: inout BindWriter)
     {
         guard let predicate else { return }
@@ -658,12 +677,7 @@ enum SQLRenderer {
             }
             if !specification.orderings.isEmpty {
                 let terms = specification.orderings
-                    .map { term -> String in
-                        let column =
-                            writer.qualified && !term.table.isEmpty
-                            ? "\(quote(term.table)).\(quote(term.column))" : quote(term.column)
-                        return "\(column) \(term.clause)"
-                    }
+                    .map { orderTerm($0, writer: &writer) }
                     .joined(separator: ", ")
                 clauses.append("ORDER BY \(terms)")
             }
@@ -673,6 +687,11 @@ enum SQLRenderer {
             return "(\(render(operand, writer: &writer)))::\(type)"
         case .inSubquery(let lhs, let subquery):
             return "(\(render(lhs, writer: &writer)) IN (\(subquery.render(&writer))))"
+        case .aggregateFilter(let aggregate, let condition):
+            return "\(render(aggregate, writer: &writer)) FILTER (WHERE \(render(condition, writer: &writer)))"
+        case .withinGroup(let name, let arguments, let operand):
+            let rendered = arguments.map { render($0, writer: &writer) }.joined(separator: ", ")
+            return "\(name)(\(rendered)) WITHIN GROUP (ORDER BY \(render(operand, writer: &writer)))"
         case .scalarSubquery(let subquery):
             return "(\(subquery.render(&writer)))"
         case .existsSubquery(let subquery):

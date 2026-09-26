@@ -4,6 +4,48 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-09-26
+
+Reporting and bulk-update expressions from Relay's report queries.
+
+### Added
+
+- **A bulk update can assign an expression** (Relay #9).
+  `$0.version.set(to: $0.version.adding(1))` renders `SET version = (version + $1)`:
+  computed by the server, per row, so twenty concurrent increments add
+  twenty. `set(to: .transactionTimestamp)` writes the server's `now()`, and
+  `set(to: $0.otherColumn)` copies a column. The expressions are
+  `ColumnExpression<Value>`: usable in `where`, in a SELECT list, and in
+  `groupBy`.
+- **Arithmetic is methods, not operators**: `adding`, `subtracting`,
+  `multiplied(by:)`, `divided(by:)`, each taking a value or another column
+  or expression. `+ - * /` overloads were built and measured first. Generic
+  ones doubled the time Swift takes to type-check ordinary `Double`
+  arithmetic in any file importing Hangar, and made one test's plain
+  arithmetic too slow to compile at all. Concrete ones were slower still.
+- **Set operations across entities** (Relay #15). Projections of different
+  tables into the same `Result` combine with `union`, `unionAll`,
+  `intersect` and `except` into a `CombinedQuery`. It can be ordered by an
+  output column (`.order("at", .desc)`), limited and offset, and run with
+  `repo.all`. A `select(into:)` branch with its labels in another order is
+  lined up by label, since Postgres pairs columns by position. A branch with
+  different labels is refused before anything runs. Chaining is
+  parenthesised, so `a.union(b).intersect(c)` means what it reads as, even
+  though `INTERSECT` binds tighter in SQL.
+- **Reporting expressions** (Relay #14):
+  - `groupBy` takes an expression, and `$0.openedAt.truncated(to: .day,
+    in: zone)` renders `date_trunc` with its unit and zone as literals, so
+    the grouped and the selected expression are the same text.
+  - Interval arithmetic: `$0.acknowledgedAt.interval(since: $0.openedAt)`,
+    with `.seconds` to aggregate it.
+  - Aggregate `FILTER`: `$0.id.count().filter($0.status == .open)`. It sits
+    inside the decoding cast, and a second `filter` narrows further.
+  - Ordered-set aggregates: `percentile(0.95)` and `median()`
+    (`percentile_cont … WITHIN GROUP`).
+  - Aggregates over expressions (`avg`, `sum`, `min`, `max`, `count`).
+  - Ordering by an expression or an aggregate, in `order` and in a
+    window's `ORDER BY`: `rank().over(.order(by: $0.id.count().desc()))`.
+
 ## [0.12.0] - 2026-09-26
 
 ### Added
