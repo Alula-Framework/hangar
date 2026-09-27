@@ -21,6 +21,8 @@ public struct Page<Element: Sendable>: Sendable {
         self.perPage = max(1, perPage)
     }
 
+    /// How many pages `total` rows fill at `perPage` a page; 0 when there
+    /// are no rows.
     public var pageCount: Int {
         // Integer arithmetic: a Double stops representing every integer at
         // 2^53, and `total` is an Int.

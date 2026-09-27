@@ -137,7 +137,8 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// something to look up.
     ///
     /// Codes raised when a query runs are `HGR-QUERY-41xx`; the `40xx` codes
-    /// are build errors.
+    /// are build errors, except `HGR-QUERY-4005`, a query shape Hangar can
+    /// only catch when the query runs.
     public var code: String? {
         switch self {
         case .transactionAborted: "HGR-QUERY-4101"

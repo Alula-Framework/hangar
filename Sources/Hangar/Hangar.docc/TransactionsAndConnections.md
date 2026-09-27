@@ -79,9 +79,27 @@ do {
 }
 ```
 
-Its description never includes row values — the server's detail for a
-unique violation quotes the row, so it stays on
-``DatabaseError/underlying`` for code that wants it deliberately.
+Its description never includes row values. It is metadata only: kind,
+SQLSTATE, table, constraint and column names. The server's own text can
+quote data (a unique violation's detail quotes the row, a failed cast quotes
+the value), so it stays on ``DatabaseError/message`` and
+``DatabaseError/underlying`` for code that wants it deliberately. The
+exception is an error about the statement itself, SQLSTATE class 42 or 0A,
+whose message names only what the SQL names and is part of the description:
+`database error (SQLSTATE 42703): column "nmae" does not exist`. For an
+undefined column or table, ``DatabaseError/hint`` adds `HGR-QUERY-4114`: the
+database may be behind the application's migrations.
+
+Every statement the server rejects is logged once, with that metadata and
+the SQL as sent (placeholders, never values). The log goes to the repo's
+logger, or to a `hangar.diagnostics` logger when the repo has none. The
+level follows the meaning:
+
+- A constraint violation (class 23) is `info`. It is how an application
+  enforces its invariants, and the caller decides whether it is an error.
+- A serialization failure or deadlock (40001, 40P01) is `notice`. Running
+  the transaction again is the remedy.
+- Everything else is `error`.
 
 A statement that never got an answer — the server refused the connection,
 the network dropped it, the pool was closed — is a
@@ -131,6 +149,23 @@ let repo = Repo(connection: connection)
 
 ``Repo/isInTransaction`` reports what the repo believes, which is a useful
 thing to assert in an integration's tests.
+
+A pool that leases connections cannot otherwise tell a connection in the
+middle of a transaction from an idle one, because Hangar sends `BEGIN` and
+`COMMIT` itself. Pass a ``TransactionObserver`` so the pool never hands an
+open transaction to the next borrower:
+
+```swift
+let repo = Repo(connection: connection, transactionObserver: TransactionObserver(
+    began: { lease.markInTransaction() },
+    ended: { lease.markIdle() }))
+```
+
+`began` runs before `BEGIN` is sent, and `ended` runs once `COMMIT` or
+`ROLLBACK` has been answered. Only the outermost transaction is reported, not
+savepoints. A scope that dies in between, or a `ROLLBACK` that fails, leaves
+the owner with `began` and no `ended`. That is the connection to roll back
+or discard.
 
 ## Isolation levels and retry
 

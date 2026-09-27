@@ -39,7 +39,7 @@ extension Query {
     ///
     /// Select the same expression to read the group's value. Postgres matches
     /// a selected expression to a grouped one by its text, so an expression
-    /// with a bound value (`$0.score / 10`) renders a different placeholder in
+    /// with a bound value (`$0.score.divided(by: 10)`) renders a different placeholder in
     /// each place and does not match; ``RowValue/truncated(to:in:)`` renders
     /// its unit as SQL for exactly this reason.
     public func groupBy<V>(_ build: (Model.QueryColumns) -> ColumnExpression<V>) -> Query<

@@ -10,9 +10,9 @@ An association is declared on the model and loaded on demand:
 @Entity("posts")
 struct Post {
     @ID var id: UUID
-    @Column var authorID: UUID
-    @BelongsTo(\.authorID) var author: Loadable<Author>
-    @HasMany(\Comment.postID) var comments: Loadable<[Comment]>
+    var authorID: UUID
+    @BelongsTo(foreignKey: \Post.authorID) var author: Loadable<Author>
+    @HasMany(foreignKey: \Comment.postID) var comments: Loadable<[Comment]>
 }
 ```
 

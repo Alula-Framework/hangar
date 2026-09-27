@@ -20,7 +20,7 @@ public enum IsolationLevel: String, Sendable {
     case repeatableRead = "REPEATABLE READ"
     /// Full serializability. Concurrent conflicting transactions fail with
     /// SQLSTATE 40001 and must be retried — see
-    /// `transaction(isolation:retryingOnSerializationFailure:_:)`.
+    /// ``Repo/transaction(isolation:statementTimeout:retryingOnSerializationFailure:_:)``.
     case serializable = "SERIALIZABLE"
 }
 

@@ -10,9 +10,10 @@ typo is a compile error rather than a runtime one.
 @Entity("posts")
 struct Post {
     @ID var id: UUID
-    @Column var title: String
-    @Column var viewCount: Int
-    @BelongsTo(\.authorID) var author: Loadable<Author>
+    var title: String
+    var viewCount: Int
+    var authorID: UUID
+    @BelongsTo(foreignKey: \Post.authorID) var author: Loadable<Author>
 }
 
 let popular = try await repo.all(
@@ -27,7 +28,7 @@ let popular = try await repo.all(
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Alula-Framework/hangar", from: "0.10.0")
+    .package(url: "https://github.com/Alula-Framework/hangar", from: "0.16.0")
 ]
 ```
 
@@ -132,8 +133,40 @@ The combination is read as a derived table, so the result is an ordinary query
 again: everything downstream — `where`, `order`, `limit`, `count`, preloads —
 applies to the combined rows. Each branch keeps its own `ORDER BY` and `LIMIT`,
 so "the twenty most viewed, plus the five newest" is two bounded branches.
-Whole rows only: both sides select one entity's columns, which is what
-guarantees the shapes match.
+Whole rows of one entity: both sides select that entity's columns, which is
+what guarantees the shapes match.
+
+**Across entities**, the branches are projections into one `Result` type, and
+the combination is a `CombinedQuery` — a merged feed of two tables:
+
+```swift
+struct FeedItem: Decodable {
+    let at: Date
+    let source: String
+    let summary: String
+}
+
+let feed = Incident.all.select(into: FeedItem.self) {
+        (at: $0.openedAt, source: ColumnExpression.value("incident"), summary: $0.status)
+    }
+    .unionAll(Deploy.all.select(into: FeedItem.self) {
+        (at: $0.finishedAt, source: ColumnExpression.value("deploy"), summary: $0.service)
+    })
+    .order("at", .desc)
+    .limit(50)
+
+let items = try await repo.all(feed)
+```
+
+Postgres pairs columns by position, so a branch whose `select(into:)` labels
+come in another order is lined up by label, and one with different labels is
+refused before anything runs. A `CombinedQuery` orders by output column name,
+limits, offsets, and runs with `repo.all`; it is not a `Query`, so there is no
+`where` on the combined rows. `ColumnExpression.value(_:)` is a bound constant,
+which is how each branch says where its rows came from; write the type out,
+since the tuple gives `.value` nothing to infer it from. Chains are
+parenthesised as they read: `a.union(b).intersect(c)` intersects the union,
+even though `INTERSECT` binds tighter in SQL.
 
 **Window functions** — a value computed from the rows *around* this one.
 Every aggregate gains `.over`, so the same call site answers two questions:
@@ -175,6 +208,8 @@ p.viewCount.avg().over(.order(by: p.createdAt.asc()).rows(from: .preceding(2)))
 `rows` counts physical rows and `range` counts peers (rows the ordering cannot
 tell apart). Start and end are separate types, so a frame starting at
 `UNBOUNDED FOLLOWING` — or ending at `UNBOUNDED PRECEDING` — does not compile.
+A negative offset, such as `.preceding(n)` with `n` taken from a request, is
+not caught in Swift: Postgres refuses it and the caller gets a `DatabaseError`.
 
 **Joins**, inner and left, with the base entity's columns qualified —
 including self-joins through table aliases:
@@ -460,23 +495,96 @@ try await repo.stream(Post.all.order { $0.id.asc() }) { posts in
 the count returned and typed, bound assignments:
 
 ```swift
-try await repo.insert(rows.map(Event.init))          // one multi-row INSERT
+try await repo.insert(rows.map(Event.init))          // multi-row INSERT
 try await repo.delete(Session.where { $0.expiresAt < .now })
 try await repo.update(Post.where { $0.published == false }) {
     ($0.published.set(to: true), $0.reviewedAt.set(to: Date()))
 }
 ```
 
+A batch insert is one statement until its rows × columns pass the 65,535
+parameters Postgres binds per statement; then it is split into several
+statements inside one transaction. It stays all-or-nothing, but
+statement-level triggers fire once per chunk.
+
 A query carrying a clause the statement cannot honor — `limit`, `order`,
 `groupBy` — throws rather than executing with it silently dropped.
 
-**Changesets**, upserts, dynamic filters over an explicit allowlist, array
-columns (`text[]`, `integer[]`, ...), and read-replica routing.
+An assignment can be an expression the server computes per row, so
+concurrent increments do not lose updates:
+
+```swift
+try await repo.update(Incident.where { $0.id == id }) {
+    ($0.version.set(to: $0.version.adding(1)),       // SET version = (version + $1)
+     $0.updatedAt.set(to: .transactionTimestamp))    // the server's now()
+}
+```
+
+Arithmetic is methods, not operators: `adding`, `subtracting`,
+`multiplied(by:)` and `divided(by:)`, each taking a value, a column or another
+expression. The result is a `ColumnExpression`, which also works in `where`
+(`$0.price.multiplied(by: $0.quantity) > 10_000`), in a SELECT list, and in
+`groupBy`. There are no `+ - * /` overloads on columns: generic ones doubled
+the time Swift takes to type-check ordinary `Double` arithmetic in any file
+importing Hangar. `set(to: $0.otherColumn)` copies a column.
+
+**Reporting expressions** for dashboard queries: grouping by a truncated
+timestamp, the interval between two timestamps, an aggregate over some of the
+rows (`FILTER`), and percentiles:
+
+```swift
+let utc = TimeZone(identifier: "UTC")!
+
+try await repo.all(
+    Incident.groupBy { $0.openedAt.truncated(to: .day, in: utc) }
+        .select(into: DailyTrend.self) {
+            (day: $0.openedAt.truncated(to: .day, in: utc),
+             opened: $0.id.count(),
+             critical: $0.id.count().filter($0.severity == 1),
+             medianAckSeconds: $0.acknowledgedAt.interval(since: $0.openedAt).seconds.median())
+        }
+        .order { $0.openedAt.truncated(to: .day, in: utc).asc() })
+```
+
+`percentile(0.95)` is the p95, and `order` takes an aggregate as well
+(`.order { $0.id.count().desc() }`). The DocC article *Reporting queries*
+covers the rest.
+
+**Upserts** — `repo.insert(models, onConflict:)` with `.doNothing` or
+`.doUpdate(target:set:)`, by columns, a partial index, or a constraint name.
+Postgres refuses a `DO UPDATE` whose rows conflict with each other. A batch
+too large for one statement would hide that by updating the row once per
+chunk, so Hangar throws `HangarError.invalidConflictClause` before sending
+it; a split `DO UPDATE` must also name its target by columns.
+
+**Dynamic filters** from a request, through an explicit allowlist:
+
+```swift
+extension Incident: DynamicallyFilterable {
+    static let filterable: [String: AnyColumn<Incident>] = [
+        "status": .init(\.status),
+        "severity": .init(\.severity),     // smallint, so Int16
+    ]
+}
+
+let query = try Incident.where(dynamic: filters)   // [String: DynamicFilterValue]
+```
+
+`String`, `Int`, `Int16`, `Int32`, `Int64`, `Double`, `Bool`, `UUID` and
+`Date` columns are filterable as they are, and a `PostgresEnum` opts in with
+`extension Status: DynamicFilterConvertible {}`. Any other type is a build
+error, `HGR-QUERY-4006`, that says so. An unknown field throws
+`unknownFilterField` and a value that does not fit the column's type, such as
+70000 for a `smallint`, throws `invalidFilterValue`. Both have
+`isClientInput == true`.
+
+**Changesets**, array columns (`text[]`, `integer[]`, ...), and read-replica
+routing.
 
 ## Queries Postgres would reject do not compile
 
-Four mistakes that used to reach the server and fail there are build errors
-now, each naming the rule it breaks and the fix:
+Mistakes that used to reach the server and fail there are build errors now,
+each naming the rule it breaks and the fix:
 
 ```swift
 Post.where { $0.viewCount.sum() > 5 }
@@ -509,15 +617,46 @@ compiler explains rather than saying "binary operator cannot be applied".
 push and fails if any of them builds — a compile-time guarantee is exactly the
 kind of claim that rots silently when an overload is widened.
 
-Each error carries a stable code — `HGR-QUERY-4001` to `4004` — and a link to
-its page in [`Diagnostics/`](Diagnostics/), which says why Postgres refuses it
-and how to write the query instead. The same check fails if a code is declared
-but never produced, or has no page.
+Each error carries a stable code (`HGR-QUERY-4001` to `4004`, and `4006` for
+a dynamic filter over a type that cannot be filtered) and a link to its page
+in [`Diagnostics/`](Diagnostics/), which says why Postgres refuses it and how
+to write the query instead. The same check fails if a code is declared but
+never produced, or has no page.
 
 One mistake cannot be a build error without splitting every query type in
 two: a row lock combined with `UNION`, `INTERSECT` or `EXCEPT`. Running such a
 query throws `HangarError.rowLockOnSetOperation` — `HGR-QUERY-4005` — before
 anything is sent.
+
+## Diagnostics
+
+Every error worth looking up has a code of the form `HGR-QUERY-NNNN`, and each
+code has a page in [`Diagnostics/`](Diagnostics/) that explains the cause and
+the fix.
+
+- **`40xx` are build errors**: 4001–4004 and 4006, above. The compiler prints
+  the code and the page's URL. The exception is 4005, a query shape that is
+  only caught when it runs.
+- **`41xx` are raised when a query runs**: `HangarError.code` is
+  `HGR-QUERY-4101` to `4113` (transaction aborted, no ambient repo, too many
+  rows, stale model, not soft-deletable, column count or decode mismatch,
+  unknown enum value, not preloaded, stream outlived its lease, bulk-write
+  clause, unknown filter field, invalid filter value). The description starts
+  with the code and ends with the page's URL:
+
+  ```
+  [HGR-QUERY-4103] one(...) on "incidents" matched more than one row; use all(...)
+  or add a narrower predicate. See https://github.com/Alula-Framework/hangar/blob/main/Diagnostics/HGR-QUERY-4103.md
+  ```
+
+  Match on the case or on `code`, not on the text. Internal invariants, which
+  are Hangar bugs, have no code.
+- **`HGR-QUERY-4114`** is a hint, not an error of its own. A `DatabaseError`
+  for an undefined column (42703) or table (42P01) carries it in `hint` and
+  in its description: the database is probably behind the application's
+  migrations.
+
+`alula explain HGR-QUERY-4104` prints a code's page in the terminal.
 
 ## Column types
 
@@ -550,10 +689,49 @@ depth, never from user input.
 `SQLFragment`'s `\(raw:)` is the one deliberate hole, and it announces itself.
 
 Server errors arrive as a typed `DatabaseError` — `isUniqueViolation`,
-`constraint`, `columnName` — whose description never quotes row values, and
-failures are logged the same way. A transaction whose body swallowed a failed
-statement throws `HangarError.transactionAborted` instead of reporting a
-commit Postgres did not perform.
+`constraint`, `columnName` — whose description never quotes row values: it
+is metadata only (kind, SQLSTATE, table, constraint and column names). The
+exception is an error about the statement itself (SQLSTATE class 42 or 0A),
+whose message names only what the SQL names, so
+`database error (SQLSTATE 42703): column "nmae" does not exist` says which
+column. The server's words stay on `message` and `underlying`.
+
+Every statement the server rejects is logged once, with the same metadata and
+the SQL (placeholders, never values), through the repo's logger or, on a repo
+built without one, a `hangar.diagnostics` logger. The level follows the
+meaning: a
+constraint violation (class 23) is `info`, since the caller decides whether it
+is an error; a serialization failure or deadlock is `notice`, since running
+it again is the remedy; everything else is `error`.
+
+A statement that never got an answer (connection refused, connection
+dropped, TLS or authentication setup failed, pool closed) throws
+`DatabaseConnectionError`, whose description says why:
+`could not connect to the database: connection refused (127.0.0.1:5432)`.
+PostgresNIO's own error is kept as `underlying`.
+
+A transaction whose body swallowed a failed statement throws
+`HangarError.transactionAborted` instead of reporting a commit Postgres did
+not perform.
+
+Three properties sort failures the way an HTTP layer answers them:
+
+```swift
+func httpStatus(for error: any Error) -> Int {
+    switch error {
+    case let error as HangarError where error.isClientInput: 400
+    case let error as DatabaseError where error.isUniqueViolation: 409
+    case let error as DatabaseError where error.isTransient: 503
+    case let error as DatabaseConnectionError where error.isTransient: 503
+    default: 500
+    }
+}
+```
+
+`isTransient` means the same request can succeed later: a serialization
+failure, deadlock, lock or statement timeout, a server short of connections
+or restarting, an unreachable database. `isClientInput` is true for a dynamic
+filter's unknown field or mistyped value.
 
 ## Binding a repo to a connection you own
 
@@ -577,6 +755,21 @@ let repo = Repo(connection: connection)
 >
 > Hangar cannot detect this itself: PostgresNIO does not expose the
 > connection's transaction status. The caller knows, so the caller says.
+
+A pool that leases connections needs to know when one has a transaction open,
+so it never hands that connection to the next borrower. Pass a
+`TransactionObserver`:
+
+```swift
+let repo = Repo(connection: connection, transactionObserver: TransactionObserver(
+    began: { lease.markInTransaction() },
+    ended: { lease.markIdle() }))
+```
+
+`began` runs before `BEGIN` is sent, and `ended` runs once `COMMIT` or
+`ROLLBACK` has been answered. Savepoints are not reported. A connection left
+with `began` and no `ended` (the scope died, or `ROLLBACK` failed) is the one
+to roll back or discard.
 
 ## Starting from a database you already have
 
@@ -676,6 +869,32 @@ Whether you need this is not something a signature can tell you: a cycle is a
 property of the data, not of the query, and the same walk is finite over a
 tree and endless over a graph. What the type can do is make asking for it one
 call.
+
+With cycle detection on, each row also carries the keys walked from the
+anchor to reach it. `walkedPath(of:)` selects them, and `closesCycle` picks out
+the rows that closed a cycle, so this lists every cycle reachable from the
+root:
+
+```swift
+let paths = try await repo.all(
+    Node.all
+        .withRecursive(tree, anchor: Node.where { $0.name == "root" }) { found in
+            Node.join(found, on: { child, parent in child.parentID == parent.id })
+        }
+        .reading(from: tree, includingCycleClosers: true)
+        .where { _ in tree.closesCycle }
+        .select { _ in tree.walkedPath(of: { $0.id }) })
+// [[root, b, c, root]]
+```
+
+Pass the same column you passed to `detectingCycles(on:)`. A path ends with
+the key it returned to, but the cycle starts at that key's *first*
+appearance, which is not always the anchor. From `w → x → y → z → x` the path
+is `[w, x, y, z, x]` and the cycle is `[x, y, z, x]`:
+
+```swift
+let cycles = paths.map { path in path.firstIndex(of: path.last!).map { Array(path[$0...]) } ?? path }
+```
 
 A CTE body is a whole-row query by construction. That is the guarantee that
 makes reading it back as the entity safe: a projection would not expose the

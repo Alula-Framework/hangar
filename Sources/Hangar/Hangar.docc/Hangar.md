@@ -11,9 +11,10 @@ so a misspelled column is a compile error rather than a runtime one.
 @Entity("posts")
 struct Post {
     @ID var id: UUID
-    @Column var title: String
-    @Column var viewCount: Int
-    @BelongsTo(\.authorID) var author: Loadable<Author>
+    var title: String
+    var viewCount: Int
+    var authorID: UUID
+    @BelongsTo(foreignKey: \Post.authorID) var author: Loadable<Author>
 }
 
 let popular = try await repo.all(
@@ -65,9 +66,16 @@ just the problem, because someone is usually reading it during an incident.
 - ``Aliased``
 - ``CommonTableExpression``
 - ``Predicate``
+- ``CommonTable``
 - ``DeletedRowScope``
-- ``DynamicFilterValue``
 - ``CombinedQuery``
+
+### Dynamic filters
+
+- ``DynamicallyFilterable``
+- ``AnyColumn``
+- ``DynamicFilterConvertible``
+- ``DynamicFilterValue``
 
 ### Expressions
 
@@ -82,6 +90,7 @@ just the problem, because someone is usually reading it during an incident.
 
 - ``Repo``
 - ``IsolationLevel``
+- ``TransactionObserver``
 - ``Multi``
 - ``PostgresRowStream``
 - ``Page``
@@ -100,4 +109,5 @@ just the problem, because someone is usually reading it during an incident.
 
 - <doc:ComposedJoins>
 - <doc:Preloading>
+- <doc:ReportingQueries>
 - <doc:TransactionsAndConnections>

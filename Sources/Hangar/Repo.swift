@@ -83,8 +83,11 @@ public struct Repo: Sendable {
     /// connection's lease.
     /// - Parameters:
     ///   - connection: The connection every statement runs on.
-    ///   - logger: Where statements are logged at debug level. `nil` stays
-    ///     quiet.
+    ///   - logger: Where statements are logged at debug level, and passed to
+    ///     PostgresNIO. `nil` turns both off. A statement the server rejects
+    ///     is still logged, through a `hangar.diagnostics` logger: metadata
+    ///     only, at `info` for a constraint violation, `notice` for a
+    ///     serialization failure or deadlock, and `error` for the rest.
     ///   - inTransaction: Whether `connection` is **already** inside a
     ///     transaction the caller opened.
     ///
@@ -784,13 +787,20 @@ public struct Repo: Sendable {
     /// without one — which is every repo `withRepo` constructs.
     ///
     /// Metadata only: SQLSTATE, kind, table, constraint and column *names*,
-    /// with the SQL as sent (placeholders, never values). The server's text
-    /// is left out — its detail quotes rows (`Key (email)=(ada@…)`), and its
-    /// primary message can too (`invalid input syntax for type integer:
-    /// "<the value>"`), as can a trigger's `RAISE` — while an error-level line
-    /// reaches every log sink an application has. It is all still on
+    /// with the SQL as sent (placeholders, never values), and the
+    /// ``DatabaseError/hint`` when there is one. The server's text is left
+    /// out — its detail quotes rows (`Key (email)=(ada@…)`), and its primary
+    /// message can too (`invalid input syntax for type integer: "<the
+    /// value>"`), as can a trigger's `RAISE` — while this line reaches every
+    /// log sink an application has. The exception is an error about the
+    /// statement itself (class 42, class 0A), whose message names only what
+    /// the SQL names and goes in as `message`. The rest is still on
     /// ``DatabaseError/message`` and ``DatabaseError/underlying`` for code
     /// that wants it on purpose.
+    ///
+    /// The level is `failureLevel(sqlState:)`'s: `info` for a constraint
+    /// violation, `notice` for a serialization failure or deadlock, `error`
+    /// for the rest.
     private func reportFailure(_ error: any Error, sql: String, operation: String) {
         guard let database = error as? DatabaseError else { return }
         var metadata: Logger.Metadata = [

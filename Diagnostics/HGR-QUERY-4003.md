@@ -14,6 +14,10 @@ Postgres rejects both: "frame start cannot be UNBOUNDED FOLLOWING" and
 it ends. Hangar makes the start and the end different types, `FrameStart` and
 `FrameEnd`, so each side only offers the bounds that are legal there.
 
+A negative offset, such as `.preceding(n)` with `n` taken from a request, is
+not this error: Swift cannot see the value's sign, so Postgres refuses the
+statement when it runs and the caller gets a `DatabaseError`.
+
 ## Fixes
 
 1. Start the frame at `.unboundedPreceding`, `.preceding(n)`, `.currentRow` or

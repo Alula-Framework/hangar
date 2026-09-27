@@ -17,7 +17,7 @@ import PostgresNIO
 ///
 /// ```swift
 /// do {
-///     try await repo.all(Incident.self)
+///     try await repo.all(Incident.all)
 /// } catch let error as DatabaseConnectionError where error.isTransient {
 ///     return .serviceUnavailable   // 503: worth retrying later
 /// }
