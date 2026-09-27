@@ -4,6 +4,19 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-09-27
+
+### Added
+
+- **A recursive walk says which path it took** (Relay #14, Q08). With
+  `detectingCycles(on:)` on, each row of the CTE carries the keys walked
+  from the anchor to reach it, and `tree.walkedPath(of: { $0.id })` selects
+  them as `[Value]`. `tree.closesCycle` picks out the rows that closed a
+  cycle, so reading the closers with their paths lists each cycle, ending
+  where it began: `[root, b, c, root]`. `CYCLE`'s own path column could not
+  be used: its elements are anonymous records that Postgres will not let a
+  query take apart. Hangar keeps the path itself, in `hangar_walk`.
+
 ## [0.15.0] - 2026-09-27
 
 ### Added

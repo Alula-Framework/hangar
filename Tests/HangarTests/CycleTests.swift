@@ -83,6 +83,33 @@ extension PostgresIntegrationSuite {
             }
         }
 
+        @Test("the row that closed the cycle carries the path it walked")
+        func walkedPath() async throws {
+            try await withRepo { repo in
+                try await seedCycle(repo)
+                let tree = CommonTable<Node>("tree").detectingCycles(on: { $0.id })
+                let walked = Node.all
+                    .withRecursive(tree, anchor: Node.where { $0.name == "root" }) { found in
+                        Node.join(found, on: { child, parent in child.parentID == parent.id })
+                    }
+                let paths = try await repo.all(
+                    walked.reading(from: tree, includingCycleClosers: true)
+                        .where { _ in tree.closesCycle }
+                        .select { _ in tree.walkedPath(of: { $0.id }) })
+                let byID = Dictionary(
+                    uniqueKeysWithValues: try await repo.all(Node.all).map { ($0.id, $0.name) })
+                // One cycle, walked from root through its three members and
+                // back: the path ends where it began.
+                #expect(paths.map { $0.map { byID[$0] ?? "?" } } == [["root", "b", "c", "root"]])
+
+                // Every row has a path; the anchor's is itself.
+                let rootPath = try await repo.all(
+                    walked.reading(from: tree).where { $0.name == "root" }
+                        .select { _ in tree.walkedPath(of: { $0.id }) })
+                #expect(rootPath.map(\.count) == [1])
+            }
+        }
+
         @Test("the closing row is there when asked for")
         func closersVisible() async throws {
             try await withRepo { repo in

@@ -63,6 +63,10 @@ public struct CommonTable<T: Table>: Sendable {
     /// are invisible to anything reading the CTE back as its entity.
     static var cycleMarkColumn: String { "hangar_is_cycle" }
     static var cyclePathColumn: String { "hangar_cycle_path" }
+    /// The keys walked to reach each row, anchor first — kept by Hangar
+    /// beside `CYCLE`'s own path, whose elements are anonymous records
+    /// Postgres will not let a query take apart.
+    static var walkColumn: String { "hangar_walk" }
 
     /// Stop recursion when a row repeats, keyed on this column.
     ///
@@ -142,6 +146,36 @@ public struct CommonTable<T: Table>: Sendable {
         return base.where { _ in
             SQLFragment(stringLiteral: #"NOT "\#(Self.cycleMarkColumn)""#)
         }
+    }
+
+    /// True for the row that closed a cycle — for
+    /// `.where { _ in tree.closesCycle }` on a read that includes the closers.
+    public var closesCycle: Predicate {
+        Predicate(expression: .column(table: "", name: Self.cycleMarkColumn))
+    }
+
+    /// The keys walked from the anchor to this row, in order — with
+    /// ``detectingCycles(on:)`` on, pass the same column. For the row that
+    /// closed a cycle, the path ends with the key it returned to, so the
+    /// cycle is the path from that key's first appearance:
+    ///
+    /// ```swift
+    /// let tree = CommonTable<Node>("tree").detectingCycles(on: { $0.id })
+    /// let cycles = try await repo.all(
+    ///     Node.all
+    ///         .withRecursive(tree, anchor: Node.where { $0.name == "root" }) { found in
+    ///             Node.join(found, on: { child, parent in child.parentID == parent.id })
+    ///         }
+    ///         .reading(from: tree, includingCycleClosers: true)
+    ///         .where { _ in tree.closesCycle }
+    ///         .select { _ in tree.walkedPath(of: { $0.id }) })
+    /// // [[a, c, b, a]]
+    /// ```
+    ///
+    /// Without cycle detection there is no path to read, and Postgres
+    /// reports the column as undefined.
+    public func walkedPath<Value>(of key: (T.QueryColumns) -> Column<Value>) -> ColumnExpression<[Value]> {
+        ColumnExpression(expression: .column(table: "", name: Self.walkColumn))
     }
 
     /// Every row the CTE produced, including the one that closed a cycle.
@@ -313,7 +347,15 @@ extension Query {
             CommonTableExpression(
                 name: table.name, isRecursive: true,
                 body: .query { writer in
-                    let head = SQLRenderer.selectText(anchor, writer: &writer)
+                    // With cycle detection, each row also carries the keys
+                    // walked to reach it: the anchor starts the array, each
+                    // step appends its own key.
+                    let walk = CommonTable<T>.walkColumn
+                    let head = SQLRenderer.selectText(
+                        anchor, writer: &writer,
+                        overrideList: table.cycleKey.map {
+                            "\(T.schema.selectList), ARRAY[\(SQLRenderer.quote($0))] AS \(SQLRenderer.quote(walk))"
+                        })
                     // Qualified for the step, and only the step. A join's
                     // renderer assumes its caller has already set this — the
                     // statement-level entry points do — and without it the ON
@@ -334,7 +376,11 @@ extension Query {
                     do {
                         tail = try SQLRenderer.selectText(
                             stepQuery, writer: &writer,
-                            overrideList: T.schema.qualifiedSelectList)
+                            overrideList: T.schema.qualifiedSelectList
+                                + (table.cycleKey.map {
+                                    ", \(SQLRenderer.quote(table.name)).\(SQLRenderer.quote(walk)) || "
+                                        + "\(SQLRenderer.quote(T.schema.name)).\(SQLRenderer.quote($0))"
+                                } ?? ""))
                     } catch {
                         tail = "-- hangar could not render the recursive step: \(error)"
                     }
