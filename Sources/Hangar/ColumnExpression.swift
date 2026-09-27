@@ -23,6 +23,26 @@ public struct ColumnExpression<Value>: Sendable, Selectable {
     public var _selectFragment: SelectFragment { SelectFragment(expression: expression) }
 }
 
+extension ColumnExpression where Value: ColumnCodable {
+    /// A constant, the same in every row — bound as a parameter, never SQL
+    /// text. Its use is a projection that labels where a row came from:
+    ///
+    /// ```swift
+    /// TimelineEvent.all.select(into: FeedEntry.self) {
+    ///     (at: $0.at, source: ColumnExpression.value("timeline"), kind: $0.kind)
+    /// }
+    /// .unionAll(ProviderEvent.all.select(into: FeedEntry.self) {
+    ///     (at: $0.receivedAt, source: ColumnExpression.value("provider"), kind: $0.kind)
+    /// })
+    /// ```
+    ///
+    /// Write the type out: inside a projection's tuple there is no
+    /// contextual type for `.value(…)` to be inferred from.
+    public static func value(_ value: Value) -> ColumnExpression<Value> {
+        ColumnExpression(expression: .bind(SQLBind(value)))
+    }
+}
+
 extension ColumnExpression where Value == Date {
     /// `now()` — Postgres's `transaction_timestamp()`: the transaction's
     /// start time on the server's clock, the same value for every row a

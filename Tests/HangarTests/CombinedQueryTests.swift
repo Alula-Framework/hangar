@@ -9,6 +9,12 @@ struct FeedEntry: Decodable, Sendable, Equatable {
     let text: String
 }
 
+/// A feed row that says which table it came from.
+struct SourcedEntry: Decodable, Sendable, Equatable {
+    let source: String
+    let text: String
+}
+
 @Suite("Set operations across entities — rendering")
 struct CombinedQueryRenderingTests {
     let posts = Post.all.select(into: FeedEntry.self) { (id: $0.id, text: $0.title) }
@@ -63,6 +69,23 @@ struct CombinedQueryRenderingTests {
 extension PostgresIntegrationSuite {
     @Suite("Set operations across entities (real Postgres)")
     struct CombinedQueryIntegrationTests {
+        @Test("each branch can name its source with a constant column")
+        func constantSource() async throws {
+            try await withSandbox { repo in
+                let marker = UUID().uuidString
+                try await repo.insert(Post.sample(title: "\(marker) b"))
+                try await repo.insert(Author(id: UUID(), name: "\(marker) a"))
+                let feed = Post.where { $0.title.hasPrefix(marker) }
+                    .select(into: SourcedEntry.self) { (source: ColumnExpression.value("post"), text: $0.title) }
+                    .unionAll(
+                        Author.where { $0.name.hasPrefix(marker) }
+                            .select(into: SourcedEntry.self) { (text: $0.name, source: ColumnExpression.value("author")) })
+                    .order("text")
+                let entries = try await repo.all(feed)
+                #expect(entries.map(\.source) == ["author", "post"])
+            }
+        }
+
         @Test("a feed of posts and authors comes back merged, ordered and limited")
         func mergedFeed() async throws {
             try await withSandbox { repo in

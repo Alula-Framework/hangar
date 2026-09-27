@@ -4,6 +4,17 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-09-27
+
+### Added
+
+- **`ColumnExpression.value(_:)`: a constant in a projection**, bound as a
+  parameter. It lets each branch of a set operation say where its rows came
+  from — `(at: $0.at, source: ColumnExpression.value("timeline"), …)` — which
+  a merged feed needs and #15's `CombinedQuery` could not say (Relay Q09).
+  Write the type out; a projection's tuple gives `.value` no context to be
+  inferred from.
+
 ## [0.14.0] - 2026-09-26
 
 Every error Hangar raises when a query runs now carries a code and a page.
