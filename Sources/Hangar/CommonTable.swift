@@ -156,8 +156,18 @@ public struct CommonTable<T: Table>: Sendable {
 
     /// The keys walked from the anchor to this row, in order — with
     /// ``detectingCycles(on:)`` on, pass the same column. For the row that
-    /// closed a cycle, the path ends with the key it returned to, so the
-    /// cycle is the path from that key's first appearance:
+    /// closed a cycle, the path ends with the key it returned to.
+    ///
+    /// The cycle is the path **from that key's first appearance**, which is
+    /// not always the start: an anchor outside the cycle walks into it, so
+    /// from `w → x → y → z → x` the path is `[w, x, y, z, x]` and the cycle
+    /// is `[x, y, z, x]`:
+    ///
+    /// ```swift
+    /// let cycle = path.firstIndex(of: path.last!).map { Array(path[$0...]) }
+    /// ```
+    ///
+    /// Reading every cycle reachable from the anchor:
     ///
     /// ```swift
     /// let tree = CommonTable<Node>("tree").detectingCycles(on: { $0.id })
@@ -169,7 +179,7 @@ public struct CommonTable<T: Table>: Sendable {
     ///         .reading(from: tree, includingCycleClosers: true)
     ///         .where { _ in tree.closesCycle }
     ///         .select { _ in tree.walkedPath(of: { $0.id }) })
-    /// // [[a, c, b, a]]
+    /// // [[root, b, c, root]]
     /// ```
     ///
     /// Without cycle detection there is no path to read, and Postgres
