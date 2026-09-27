@@ -119,6 +119,20 @@ jobs:
       # `platforms: [.macOS(.v15)]` claim in Package.swift compiles; Linux
       # is where the test coverage lives.
 
+  quotes:
+    # A diagnostic quoted in the docs goes stale silently when its message is
+    # reworded; nothing else reads the docs against the source. This fails
+    # when a quote's fixed wording is no longer in Sources. No Swift needed.
+    name: Quoted diagnostics match the source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check quoted diagnostics
+        run: >-
+          python3 CI/check-diagnostic-quotes.py
+          --docs README.md Diagnostics Sources
+          --source HGR=Sources
+
   docs:
     name: Build documentation
     runs-on: ubuntu-latest
