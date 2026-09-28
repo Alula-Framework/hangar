@@ -4,16 +4,25 @@ import Foundation
 ///
 /// `total` is the number of rows the query matches *without* the page's limit
 /// and offset — one extra `COUNT(*)`, which is what makes `pageCount` and
-/// "showing 21–40 of 137" possible. When a caller does not need that, the
-/// cursor-based reads below skip the count entirely.
+/// "showing 21–40 of 137" possible.
+///
+/// This is offset pagination, and Hangar has no other kind built in. There is
+/// no keyset (cursor) reader: to page by "rows after the last one seen",
+/// which stays stable while rows are inserted and does not slow down with
+/// depth, write it as a query — order by a unique key, filter past the last
+/// value, and `limit` — and fetch it with `all`, which skips the count.
 public struct Page<Element: Sendable>: Sendable {
+    /// The rows on this page, in the query's order. Empty past the last page.
     public let items: [Element]
     /// Total matching rows, ignoring pagination.
     public let total: Int
     /// 1-based.
     public let page: Int
+    /// The page size requested, at least 1. The last page can hold fewer.
     public let perPage: Int
 
+    /// A page from its parts. `perPage` below 1 is stored as 1, so
+    /// ``pageCount`` never divides by zero.
     public init(items: [Element], total: Int, page: Int, perPage: Int) {
         self.items = items
         self.total = total
@@ -28,12 +37,19 @@ public struct Page<Element: Sendable>: Sendable {
         // 2^53, and `total` is an Int.
         total <= 0 ? 0 : total / perPage + (total % perPage == 0 ? 0 : 1)
     }
+    /// Whether this is page 1 (or below).
     public var isFirst: Bool { page <= 1 }
+    /// Whether no page follows this one. True for every page when there are
+    /// no rows, and for a page requested past the end.
     public var isLast: Bool { page >= pageCount }
+    /// Whether a page follows this one.
     public var hasNext: Bool { page < pageCount }
+    /// Whether a page precedes this one. False when there are no rows at
+    /// all, so an empty result shows no pager.
     public var hasPrevious: Bool { page > 1 && total > 0 }
     /// 1-based index of the first item on this page, or nil when empty.
     public var firstIndex: Int? { items.isEmpty ? nil : saturating(offset(page: page, perPage: perPage), plus: 1) }
+    /// 1-based index of the last item on this page, or nil when empty.
     public var lastIndex: Int? {
         items.isEmpty ? nil : saturating(offset(page: page, perPage: perPage), plus: items.count)
     }
@@ -138,6 +154,16 @@ extension Repo {
     /// runs, and a row can appear on two pages or none. A query with no
     /// ordering is paginated by primary key so the result is at least
     /// deterministic, but the order that means something is yours to choose.
+    /// An order on a non-unique column (a timestamp two rows share) leaves
+    /// ties in no fixed order; add a unique column last to break them.
+    ///
+    /// **Offset pages move under concurrent writes.** Each request counts
+    /// rows from the start, so a row inserted or deleted before page 2 shifts
+    /// what page 3 holds: a reader can see a row twice or miss one. The two
+    /// statements are separate too — outside a `REPEATABLE READ` or
+    /// `SERIALIZABLE` transaction a write can land between them, and `total`
+    /// can then disagree with the rows returned. See ``Page`` for keyset
+    /// pagination, which avoids the first problem.
     public func page<M: Table>(
         _ query: Query<M, M>, _ request: PageRequest = PageRequest()
     ) async throws -> Page<M> {

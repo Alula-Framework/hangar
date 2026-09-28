@@ -281,7 +281,18 @@ extension Query {
     }
 
     /// HAVING over aggregate expressions; chained calls AND-combine:
-    /// `.groupBy { $0.authorID }.having { $0.viewCount.sum > 100 }`.
+    /// `.groupBy { $0.authorID }.having { $0.viewCount.sum() > 100 }`.
+    ///
+    /// The phase rule is carried by the predicate types, not by this method:
+    /// an aggregate comparison (`AggregatePredicate`) is accepted here and
+    /// refused by `where` (`HGR-QUERY-4001`), and a windowed one is refused
+    /// by both (`HGR-QUERY-4002`). A plain predicate is accepted too:
+    /// Postgres allows one on a grouping column and rejects it on any other.
+    ///
+    /// `having` does not require `groupBy`. Without one, Postgres treats the
+    /// whole result as a single group — which suits `count` and `exists` or a
+    /// projection of aggregates, but a full-model fetch of such a query fails
+    /// at the server with "must appear in the GROUP BY clause".
     public func having(
         _ build: (Model.QueryColumns) -> some HavingConvertible
     ) -> Query<Model, Result> {

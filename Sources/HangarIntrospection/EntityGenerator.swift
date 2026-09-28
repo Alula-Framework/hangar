@@ -8,6 +8,8 @@ import Foundation
 /// rather than a guess, because generated code is the code people trust most
 /// and read least.
 public struct EntityGenerator: Sendable {
+    /// Choices about the generated source: access level, conformances, and
+    /// which column marks soft deletion.
     public struct Options: Sendable {
         /// Property access level. Models crossing a module boundary need
         /// `public`; most do not.
@@ -18,6 +20,9 @@ public struct EntityGenerator: Sendable {
         /// column and mark it `@Deleted`.
         public var softDeleteColumnNames: Set<String>
 
+        /// Internal access, `Sendable` and `Equatable` conformances, and
+        /// `deleted_at` / `deletedAt` as the soft-delete column names, unless
+        /// given otherwise.
         public init(
             isPublic: Bool = false,
             conformances: [String] = ["Sendable", "Equatable"],
@@ -29,8 +34,10 @@ public struct EntityGenerator: Sendable {
         }
     }
 
+    /// The options every `generate` call uses.
     public let options: Options
 
+    /// A generator with the given options.
     public init(options: Options = Options()) {
         self.options = options
     }

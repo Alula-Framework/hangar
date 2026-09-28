@@ -18,6 +18,23 @@ import PostgresNIO
 /// `\(raw:)`, which is exactly as dangerous as it sounds: the string goes
 /// into the statement verbatim. Never pass it anything derived from user
 /// input.
+///
+/// The boundary, precisely:
+///
+/// - **Parameterised:** every interpolated `ColumnCodable` value, optional
+///   or not — sent as a bind, never as text.
+/// - **Statement text:** the literal segments of the string as written in
+///   source, interpolated `Column`s (as quoted identifiers from the entity's
+///   own metadata), and `\(raw:)`.
+/// - **Also statement text:** `SQLFragment(stringLiteral:)` called directly.
+///   Swift passes only literals to it implicitly, but the initializer is
+///   public and takes any `String`; called with a variable it is `\(raw:)`
+///   by another name.
+///
+/// A value bound as a parameter cannot supply SQL syntax: it can fill a
+/// value position, not name a column, a table, a sort direction, or an
+/// operator. Those have to be chosen in code — typed columns, or a
+/// `switch` over an allowlist that picks a literal.
 public struct SQLFragment: Sendable, ExpressibleByStringInterpolation {
     enum Part: Sendable {
         case sql(String)
@@ -34,6 +51,10 @@ public struct SQLFragment: Sendable, ExpressibleByStringInterpolation {
     let parts: [Part]
 
     /// A literal-only fragment — pure SQL text, no binds.
+    ///
+    /// `value` becomes statement text verbatim. Written as a string literal
+    /// that is source code; called directly with a runtime `String`, it is
+    /// as unsafe as `\(raw:)`.
     public init(stringLiteral value: String) {
         self.parts = [.sql(value)]
     }
@@ -53,6 +74,9 @@ public struct SQLFragment: Sendable, ExpressibleByStringInterpolation {
             parts.reserveCapacity(interpolationCount * 2 + 1)
         }
 
+        /// A literal segment of the interpolated string — statement text,
+        /// verbatim. Called by Swift's interpolation machinery with the
+        /// source code's own text; not user API.
         public mutating func appendLiteral(_ literal: String) {
             parts.append(.sql(literal))
         }

@@ -12,6 +12,23 @@ import Synchronization
 /// error — but iterating an escaped stream throws
 /// `HangarError.streamLeaseExpired` on the first `next()` rather than
 /// reading from a connection some other query now owns.
+///
+/// **The connection is held while you iterate.** Anything slow inside the
+/// loop — a network write, a call to another service — holds it too. From a
+/// pooled repo that is one pooled connection per open stream; a repo inside
+/// a transaction, or pinned with `Repo(connection:)`, streams on its own
+/// connection.
+///
+/// **Leaving early is supported.** Returning or throwing from the closure
+/// before the last row ends the stream: the remaining rows are never
+/// decoded, and PostgresNIO reads the rest of the result off the wire and
+/// discards it. No cancel request reaches the server, so it still
+/// produces the whole result; bound the query with `limit` if you only want
+/// the head. Cancelling the iterating task ends the stream the same way — a
+/// `next()` waiting for rows throws `CancellationError`.
+///
+/// Preloads are not applied: batching them needs every parent row at once,
+/// which is what streaming declines to hold.
 public struct PostgresRowStream<Element: Sendable>: AsyncSequence, Sendable {
     let rows: DatabaseRows
     let decode: @Sendable (PostgresRow) throws -> Element
@@ -23,6 +40,12 @@ public struct PostgresRowStream<Element: Sendable>: AsyncSequence, Sendable {
         let decode: @Sendable (PostgresRow) throws -> Element
         let lease: StreamLease
 
+        /// The next decoded row, or `nil` after the last one.
+        ///
+        /// Throws ``HangarError/streamLeaseExpired`` once the `stream { }`
+        /// closure has returned, a ``DatabaseError`` when the server fails
+        /// the statement partway (a division by zero on row one thousand),
+        /// and whatever the row's decoding throws.
         public mutating func next() async throws -> Element? {
             guard !lease.isExpired else {
                 throw HangarError.streamLeaseExpired

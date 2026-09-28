@@ -16,9 +16,12 @@ import PostgresNIO
 /// York, and read back as `07:00` UTC — five hours off. Use this type for
 /// such columns, or better, make the column `timestamptz` and use `Date`.
 public struct LocalDateTime: Sendable, Hashable, Comparable, ColumnCodable, CustomStringConvertible {
+    /// The calendar date part.
     public var date: CalendarDate
+    /// The time-of-day part.
     public var time: LocalTime
 
+    /// A wall-clock reading from its date and time of day.
     public init(date: CalendarDate, time: LocalTime) {
         self.date = date
         self.time = time
@@ -87,6 +90,8 @@ public struct LocalTime: Sendable, Hashable, Comparable, ColumnCodable, CustomSt
     /// type rejects rather than wrapping into the next day.)
     public let microsecondsSinceMidnight: Int64
 
+    /// A time of day, or `nil` when any part is out of range — hour 0–23,
+    /// minute and second 0–59, microsecond 0–999,999. No leap seconds.
     public init?(hour: Int, minute: Int, second: Int, microsecond: Int = 0) {
         guard (0..<24).contains(hour), (0..<60).contains(minute), (0..<60).contains(second),
             (0..<1_000_000).contains(microsecond)
@@ -148,11 +153,19 @@ public struct LocalTime: Sendable, Hashable, Comparable, ColumnCodable, CustomSt
 /// across a daylight-saving change. Postgres keeps the three parts separate
 /// for that reason, and so does this type — `interval '1 mon'` and
 /// `interval '30 days'` are different values that compare unequal here.
+/// (Postgres's own `=` on intervals normalises a month to 30 days and calls
+/// them equal, so a comparison made in SQL and one made in Swift can
+/// disagree.)
 public struct PostgresInterval: Sendable, Hashable, ColumnCodable, CustomStringConvertible {
+    /// Calendar months — as long as the months they land on.
     public var months: Int32
+    /// Calendar days — as long as the days they land on, so 23 or 25 hours
+    /// across a daylight-saving change when added to a `timestamptz`.
     public var days: Int32
+    /// Everything shorter than a day, exactly.
     public var microseconds: Int64
 
+    /// An interval from its three parts, none normalised into another.
     public init(months: Int32 = 0, days: Int32 = 0, microseconds: Int64 = 0) {
         self.months = months
         self.days = days

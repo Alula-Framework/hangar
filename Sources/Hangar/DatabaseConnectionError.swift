@@ -41,6 +41,8 @@ public struct DatabaseConnectionError: Error, Sendable, CustomStringConvertible 
         case closed
     }
 
+    /// What went wrong. ``isTransient`` sorts the kinds into "try again
+    /// later" and "fix the configuration".
     public let kind: Kind
     /// The system's reason, cut down to what an operator reads, e.g.
     /// `connection refused (127.0.0.1:5432)`. Never carries bound values.
@@ -53,6 +55,9 @@ public struct DatabaseConnectionError: Error, Sendable, CustomStringConvertible 
     /// setup the server will refuse again, or a pool the application closed.
     public var isTransient: Bool { kind == .unreachable || kind == .connectionLost }
 
+    /// What happened and the system's reason, e.g. `could not connect to the
+    /// database: connection refused (10.0.0.5:5432)`. Never carries bound
+    /// values; safe to log.
     public var description: String {
         let what =
             switch kind {

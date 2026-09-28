@@ -4,6 +4,33 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-09-28
+
+### Fixed
+
+- **`transaction` is `@discardableResult`.** Both overloads return the
+  body's value, so a nested savepoint whose body ends in `insert` — the
+  README's own example — warned "result of call to 'transaction' is unused".
+
+### Changed
+
+- **Documentation pass** from a documentation audit. Doc comments on about
+  60 declarations now state their contracts: which SQLSTATE each
+  `DatabaseError` kind matches, what `RowStream` holds and how early exit
+  behaves, the three ways `transaction` throws after its body returns, what
+  the retrying transaction retries (40001 and 40P01, including from
+  `COMMIT`, never a failure the body caught, and not at all when nested),
+  pagination's stability limits, and where `SQLFragment` stops binding
+  parameters. Drift fixed on the way: `having` has no phase gate (the
+  predicate types enforce what is legal), the `having` example called
+  `.sum` for `.sum()`, `Page` promised cursor reads that do not exist, the
+  retry doc cited a default `maxAttempts` there is none of, and the docs for
+  `all` and `one` sat on their unavailable grouped overloads.
+  - `Snippets/TransactionShapes.swift` compiles the README's transaction,
+    upsert, bulk-write and error examples.
+  - `CI/docs-report.py` and an advisory CI job list undocumented public
+    declarations and thin comments.
+
 ## [0.16.0] - 2026-09-27
 
 ### Added

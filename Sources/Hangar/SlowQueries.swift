@@ -24,6 +24,17 @@ public struct QueryDiagnostics: Sendable {
     /// `nil` disables the check.
     public var repeatedQueryThreshold: Int?
 
+    /// Both checks off unless given a value; see ``recommended`` for
+    /// starting points.
+    ///
+    /// - Parameters:
+    ///   - slowQueryThreshold: warn about a statement whose duration is at
+    ///     least this. The duration is measured from dispatch to the server's
+    ///     first response, so reading a large result afterwards does not count
+    ///     toward it — a slow `stream` consumer is not a slow query.
+    ///   - repeatedQueryThreshold: warn when one SQL string runs at least this
+    ///     many times inside a single ``Repo/detectingRepeatedQueries(_:)``
+    ///     block. Outside such a block nothing is counted.
     public init(slowQueryThreshold: Duration? = nil, repeatedQueryThreshold: Int? = nil) {
         self.slowQueryThreshold = slowQueryThreshold
         self.repeatedQueryThreshold = repeatedQueryThreshold
@@ -66,7 +77,7 @@ final class RepeatedQueryCounter: Sendable {
 
 extension Repo {
     /// Counts statement shapes across `body`, and warns about any that ran
-    /// more than `repeatedQueryThreshold` times.
+    /// at least `repeatedQueryThreshold` times.
     ///
     ///     try await repo.detectingRepeatedQueries {
     ///         try await renderDashboard()

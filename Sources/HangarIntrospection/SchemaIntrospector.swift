@@ -13,6 +13,9 @@ public struct SchemaIntrospector: Sendable {
     private let client: PostgresClient
     private let logger: Logger?
 
+    /// An introspector reading through `client`. `logger`, when given, is
+    /// passed to PostgresNIO for the catalogue queries; `nil` keeps them
+    /// quiet.
     public init(client: PostgresClient, logger: Logger? = nil) {
         self.client = client
         self.logger = logger

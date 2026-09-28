@@ -131,12 +131,11 @@ public struct Repo: Sendable {
 
     // MARK: Reads
 
-    /// Full-model fetch: decodes rows, then runs the query's preloads
-    /// — one batched query per association, grouped and assigned
-    /// into each model's `Loadable`.
     // swift-format's AmbiguousTrailingClosureOverload rule has no opinion here,
     // but the shape is the same one used for `where`: an overload that exists
     // only to be chosen for the wrong argument and refuse it by name.
+    /// Refuses a grouped query by name: a `GROUP BY` leaves no whole rows to
+    /// decode. See `HGR-QUERY-4004`.
     @available(
         *, unavailable,
         message: """
@@ -152,6 +151,14 @@ public struct Repo: Sendable {
         fatalError("unavailable")
     }
 
+    /// Full-model fetch: decodes rows, then runs the query's preloads
+    /// — one batched query per association, grouped and assigned
+    /// into each model's `Loadable`.
+    ///
+    /// Every row is held in memory at once; for a result too large for
+    /// that, use `stream`. With a read replica configured this reads from
+    /// the replica, unless the query takes a row lock (`lockForUpdate()`),
+    /// which goes to the primary.
     public func all<M: Table>(_ query: Query<M, M>) async throws -> [M] {
         var models: [M] = try await rows(
             for: SQLRenderer.select(query), intent: query.rowLock == nil ? .read : .write,
@@ -176,11 +183,11 @@ public struct Repo: Sendable {
         return results
     }
 
-    /// At most one row, or `nil`. More than one match is an error, not a
-    /// silent first-row pick. Preloads apply to the returned model.
     // swift-format's AmbiguousTrailingClosureOverload rule has no opinion here,
     // but the shape is the same one used for `where`: an overload that exists
     // only to be chosen for the wrong argument and refuse it by name.
+    /// Refuses a grouped query by name, as the grouped `all` does. See
+    /// `HGR-QUERY-4004`.
     @available(
         *, unavailable,
         message: """
@@ -196,6 +203,13 @@ public struct Repo: Sendable {
         fatalError("unavailable")
     }
 
+    /// At most one row, or `nil`. More than one match throws
+    /// ``HangarError/tooManyRows(table:)`` rather than silently picking the
+    /// first. Preloads apply to the returned model.
+    ///
+    /// To detect a second match it fetches up to two rows (`LIMIT 2`) —
+    /// unless the query has its own `limit`, which is honored: `.limit(1)`
+    /// reads the head of an ordered list without the check.
     public func one<M: Table>(_ query: Query<M, M>) async throws -> M? {
         var models: [M] = try await rows(
             for: SQLRenderer.select(probing(query)), intent: query.rowLock == nil ? .read : .write,
@@ -257,6 +271,17 @@ public struct Repo: Sendable {
     /// Streams full models, decoding one row at a time. Preloads on the
     /// query are **not** applied — batching needs every parent at once; use
     /// `all` when you need associations.
+    ///
+    /// The stream is valid only inside `body`, and the connection is held
+    /// until `body` returns — including while `body` waits on anything that
+    /// is not the database. Returning early is fine; the unread rows are
+    /// discarded. See ``PostgresRowStream`` for the details.
+    ///
+    /// ```swift
+    /// try await repo.stream(Post.all.order { $0.id.asc() }) { posts in
+    ///     for try await post in posts { … }
+    /// }
+    /// ```
     public func stream<M: Table, T>(
         _ query: Query<M, M>,
         _ body: (PostgresRowStream<M>) async throws -> T
@@ -270,7 +295,9 @@ public struct Repo: Sendable {
             PostgresRowStream(rows: rows, decode: { try M(from: $0) }, lease: lease))
     }
 
-    /// Streams a projection, decoding one row at a time.
+    /// Streams a projection, decoding one row at a time. The same lease
+    /// rules apply: the stream is valid only inside `body`, which holds the
+    /// connection until it returns.
     public func stream<M, R, T>(
         _ query: Query<M, R>,
         _ body: (PostgresRowStream<R>) async throws -> T
@@ -649,7 +676,13 @@ public struct Repo: Sendable {
     /// Upsert: insert with `ON CONFLICT` behavior. With
     /// `.doUpdate`, the conflicting row is updated (only the `set` columns,
     /// from the incoming values) and returned. With `.doNothing`, a
-    /// conflicting insert is skipped and the result is nil.
+    /// conflicting insert is skipped and the result is nil — as it is when a
+    /// `DO UPDATE`'s `updateWhere` rejects the existing row.
+    ///
+    /// Only the changeset's changed fields are inserted, so a `set` column
+    /// the changeset did not change takes the column's default in
+    /// `EXCLUDED`, and a conflict writes that default over the stored value.
+    /// Name in `set` only columns the changeset carries.
     @discardableResult
     public func insert<M: Table>(
         _ changeset: Changeset<M>, onConflict: OnConflict<M>

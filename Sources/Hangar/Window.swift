@@ -72,8 +72,12 @@ public enum FrameStart: Sendable {
 
 /// Where a frame ends. See ``FrameStart`` for why the two are different types.
 public enum FrameEnd: Sendable {
+    /// `n` rows back from the current one — "the frame stops before this
+    /// row".
     case preceding(Int)
+    /// The current row — and, under ``Window/range(from:to:)``, its peers.
     case currentRow
+    /// `n` rows forward from the current one.
     case following(Int)
     /// Every row to the end of the partition.
     case unboundedFollowing
@@ -110,6 +114,8 @@ public enum FrameEnd: Sendable {
 public struct Window: Sendable {
     var specification = WindowSpecification()
 
+    /// The empty window, `OVER ()`: every row the query returned, as one
+    /// unordered partition. Usually written as `.over()` instead.
     public init() {}
 
     /// Start a window with a partition: `.partition(by: sale.customerID)`.
@@ -172,6 +178,13 @@ public struct Window: Sendable {
     /// physically before, `RANGE` takes every row sharing the current one's
     /// ordering value. An offset here is an offset in the ordering column's
     /// own units, so Postgres requires exactly one `ORDER BY` column for it.
+    ///
+    /// Offsets are `Int`s, rendered as integer literals, so an offset frame
+    /// suits a numeric ordering column. An interval offset — `RANGE BETWEEN
+    /// '7 days' PRECEDING AND CURRENT ROW` over a timestamp — is not
+    /// expressible here; Postgres rejects an integer offset against a
+    /// timestamp. Frames without offsets (`.unboundedPreceding`,
+    /// `.currentRow`, `.unboundedFollowing`) work with any ordering.
     public func range(from start: FrameStart, to end: FrameEnd = .currentRow) -> Window {
         framed("RANGE", start, end)
     }

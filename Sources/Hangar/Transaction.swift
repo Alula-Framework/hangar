@@ -30,13 +30,33 @@ extension Repo {
     ///
     /// The `Repo` handed to `body` is bound to the transaction's
     /// connection — use it, not the outer repo, for everything inside, or
-    /// the work runs outside the transaction.
+    /// the work runs outside the transaction. On a pooled repo that
+    /// connection comes from the primary, never a replica.
+    ///
+    /// Returning is not by itself a commit. Three cases throw instead:
+    ///
+    /// - A statement failed and `body` caught the error. Postgres has
+    ///   aborted the transaction, answers `COMMIT` with `ROLLBACK`, and this
+    ///   throws ``HangarError/transactionAborted(cause:)`` naming the
+    ///   statement that failed. To survive an expected failure, run it in a
+    ///   nested `transaction { }`: rolling back to its savepoint leaves the
+    ///   outer transaction healthy.
+    /// - The calling task was cancelled. The outermost level checks before
+    ///   `COMMIT` and throws `CancellationError`, rolling back, so work the
+    ///   caller abandoned is not made durable.
+    /// - `COMMIT` itself failed — under `SERIALIZABLE`, a conflict is often
+    ///   detected only then, as a ``DatabaseError`` with SQLSTATE 40001.
+    ///
+    /// To roll back on purpose, throw ``RollbackError/intentional(_:)``.
+    /// See <doc:TransactionsAndConnections>.
     ///
     /// - Parameters:
     ///   - isolation: applied to the outermost `BEGIN`
     ///     (`BEGIN ISOLATION LEVEL SERIALIZABLE`); ignored on nested calls,
     ///     because Postgres ties isolation to the whole transaction and a
-    ///     savepoint cannot change it.
+    ///     savepoint cannot change it. `nil` sends a plain `BEGIN`, which
+    ///     takes the server's `default_transaction_isolation` — `READ
+    ///     COMMITTED` unless it was configured otherwise.
     ///   - statementTimeout: the longest any one statement in the
     ///     transaction may run, enforced by the server (`SET LOCAL
     ///     statement_timeout`); a statement past it fails with
@@ -48,6 +68,7 @@ extension Repo {
     ///     setting made inside a savepoint outlives its `RELEASE`.
     ///   - body: the transactional work, handed a `Repo` bound to the
     ///     transaction's connection.
+    @discardableResult
     public func transaction<T: Sendable>(
         isolation: IsolationLevel? = nil,
         statementTimeout: Duration? = nil,
@@ -147,13 +168,44 @@ extension Repo {
     ///
     /// Attempts are separated by a short randomised wait — `0...10ms` before
     /// the first retry, doubling after that — so two transactions that
-    /// conflicted do not retry in lockstep and collide again. Worst case the
-    /// default three attempts add under 30ms; cancellation propagates out of
-    /// the wait rather than being swallowed.
+    /// conflicted do not retry in lockstep and collide again. Worst case,
+    /// three attempts add under 30ms; cancellation propagates out of the
+    /// wait rather than being swallowed.
     ///
     /// Called on a repo already inside a transaction, this does not retry:
     /// a serialization failure dooms the *whole* transaction, and only its
-    /// outermost owner can run it again.
+    /// outermost owner can run it again. It then behaves exactly as a nested
+    /// ``transaction(isolation:statementTimeout:_:)``: a savepoint, with
+    /// `isolation` and `statementTimeout` ignored.
+    ///
+    /// Only a ``DatabaseError`` whose ``DatabaseError/isRetryable`` is true
+    /// is retried — SQLSTATE 40001 or 40P01, whether a statement or the
+    /// `COMMIT` raised it. Everything else propagates on the first attempt,
+    /// including a lock or statement timeout. So does a retryable failure
+    /// that `body` caught: the transaction is aborted all the same, and the
+    /// error that reaches here is ``HangarError/transactionAborted(cause:)``,
+    /// which is not retried. Let serialization failures propagate out of a
+    /// retried body.
+    ///
+    /// When the last attempt fails, its error is thrown unchanged.
+    ///
+    /// See <doc:TransactionsAndConnections>.
+    ///
+    /// - Parameters:
+    ///   - isolation: applied to the outermost `BEGIN`, as in
+    ///     ``transaction(isolation:statementTimeout:_:)``. Serialization
+    ///     failures come mostly from `.serializable` and `.repeatableRead`;
+    ///     a deadlock can happen at any level.
+    ///   - statementTimeout: the longest any one statement may run, per
+    ///     attempt; see ``transaction(isolation:statementTimeout:_:)``. A
+    ///     statement that times out is not retried.
+    ///   - maxAttempts: how many times `body` may run in total, the first
+    ///     run included — `3` means at most two retries. A value of 1 or less
+    ///     runs it once.
+    ///   - body: the transactional work, handed a `Repo` bound to the
+    ///     transaction's connection. It may run more than once, each time on
+    ///     a fresh transaction.
+    @discardableResult
     public func transaction<T: Sendable>(
         isolation: IsolationLevel? = nil,
         statementTimeout: Duration? = nil,
@@ -366,9 +418,15 @@ struct TransactionControl {
 /// which is exactly the connection it should roll back or discard. Nested
 /// levels are savepoints and are not reported.
 public struct TransactionObserver: Sendable {
+    /// Called just before the outermost `BEGIN` is sent — so a scope that
+    /// dies at any point after it still reads as "maybe open".
     public var began: @Sendable () -> Void
+    /// Called once the outermost `COMMIT` or `ROLLBACK` has been answered,
+    /// at most once per `began`. Not called when the `ROLLBACK` fails.
     public var ended: @Sendable () -> Void
 
+    /// An observer from its two callbacks. Both run on the task running the
+    /// transaction, inline, so they should return quickly.
     public init(began: @escaping @Sendable () -> Void, ended: @escaping @Sendable () -> Void) {
         self.began = began
         self.ended = ended
@@ -427,5 +485,7 @@ final class TransactionLedger: Sendable {
 /// value. Cleaner than Ecto's `Repo.rollback/1`, which needs a non-local
 /// return mechanism — Swift's throws express it directly.
 public enum RollbackError: Error, Sendable {
+    /// Roll back, carrying a value for the caller to read from the caught
+    /// error.
     case intentional(any Sendable)
 }

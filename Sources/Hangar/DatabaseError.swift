@@ -63,6 +63,13 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
         case other
     }
 
+    /// Which classified error this is.
+    ///
+    /// Each case matches one exact SQLSTATE, not a class: 23000
+    /// (`integrity_constraint_violation`) and 23001 (`restrict_violation`)
+    /// are `.other`, although ``isConstraintViolation`` is true for them.
+    /// Branch on the kind for the cases listed; read ``sqlState`` for the
+    /// rest.
     public let kind: Kind
     /// The five-character SQLSTATE, e.g. `"23505"`.
     public let sqlState: String
@@ -89,14 +96,27 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     /// The single column involved, when there is exactly one.
     public var columnName: String? { columns.count == 1 ? columns[0] : nil }
 
+    /// SQLSTATE 23505: a unique constraint or unique index rejected the row.
+    /// ``constraint`` names it and ``columns`` names its key columns.
     public var isUniqueViolation: Bool { kind == .uniqueViolation }
+    /// SQLSTATE 23503: a foreign key found no matching row, or a delete or
+    /// update left a row that still references it.
     public var isForeignKeyViolation: Bool { kind == .foreignKeyViolation }
+    /// SQLSTATE 23514: a `CHECK` constraint rejected the row.
     public var isCheckViolation: Bool { kind == .checkViolation }
+    /// SQLSTATE 23502: a `NOT NULL` column was given NULL. ``columnName``
+    /// names it.
     public var isNotNullViolation: Bool { kind == .notNullViolation }
     /// True for every integrity-constraint violation (SQLSTATE class 23).
     public var isConstraintViolation: Bool { sqlState.hasPrefix("23") }
     /// SQLSTATE 40001 or 40P01: the answers Postgres gives when running the
     /// transaction again is the documented remedy.
+    ///
+    /// Exactly the errors
+    /// ``Repo/transaction(isolation:statementTimeout:retryingOnSerializationFailure:_:)``
+    /// retries. A lock or statement timeout is ``isTransient`` but not
+    /// retryable: running the same transaction again at once would most
+    /// likely wait on the same thing.
     public var isRetryable: Bool { kind == .serializationFailure || kind == .deadlock }
 
     /// Whether the same request can succeed later without changing it — the
@@ -156,6 +176,10 @@ public struct DatabaseError: Error, Sendable, CustomStringConvertible {
     /// The code for ``hint`` on an undefined column or table.
     static let behindMigrationsCode = "HGR-QUERY-4114"
 
+    /// Metadata only: the kind, SQLSTATE, and the table, constraint and
+    /// column names, plus ``hint`` when there is one. The server's message
+    /// is included only for SQLSTATE class 42 and 0A, which describe the
+    /// statement rather than the data. Safe to log.
     public var description: String {
         var parts = ["\(Self.name(of: kind)) (SQLSTATE \(sqlState))"]
         if let statementMessage { parts[0] += ": \(statementMessage)" }

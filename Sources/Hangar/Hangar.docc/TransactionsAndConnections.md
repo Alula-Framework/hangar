@@ -190,6 +190,16 @@ try await repo.transaction(
 The body must be safe to run more than once; side effects outside the
 database do not roll back, so keep them out of retried bodies.
 
+The number is the total attempts, the first included: `3` is at most two
+retries, each on a fresh transaction after a short randomised wait. Only
+``DatabaseError/isRetryable`` failures (40001, 40P01) are retried, whether a
+statement or the `COMMIT` raised them; a lock or statement timeout is not. A
+retryable failure the body *catches* is not retried either: the transaction
+is aborted regardless, and what reaches the retry is
+``HangarError/transactionAborted(cause:)``. Called inside another
+transaction, it does not retry at all — it becomes a savepoint, and only the
+outermost transaction can be run again.
+
 ## Raw SQL on the transaction's connection
 
 ``Repo/execute(_:)`` runs one statement under `SQLFragment`'s interpolation
