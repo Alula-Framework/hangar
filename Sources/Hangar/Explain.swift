@@ -11,8 +11,10 @@ public enum ExplainMode: Sendable, Equatable {
     ///
     /// The estimate and the reality diverging is usually the answer, so this
     /// is the more useful of the two — but it executes, so a write statement
-    /// writes. `Repo.explain` refuses to analyze anything but a read for that
-    /// reason.
+    /// writes. The `Query` overload of `Repo.explain` can only render a
+    /// `SELECT`; the `SQLFragment` overload explains whatever it is given,
+    /// and analyzing an `UPDATE` or `DELETE` there performs it. Nothing
+    /// refuses that: pass a write only with `.plan`.
     case analyze
 }
 
@@ -41,6 +43,11 @@ extension Repo {
 
     /// The plan for a raw fragment, for the statements the query builder does
     /// not express.
+    ///
+    /// Any statement is accepted, reads and writes alike. With `.analyze` a
+    /// write is executed. Explaining routes as a read, so outside a
+    /// transaction on a repo with a read replica the write goes to the
+    /// replica, which refuses it.
     public func explain(_ fragment: SQLFragment, mode: ExplainMode = .plan) async throws -> String {
         var writer = BindWriter()
         let sql = SQLRenderer.render(.fragment(fragment.parts), writer: &writer)

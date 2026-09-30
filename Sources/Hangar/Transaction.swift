@@ -68,6 +68,8 @@ extension Repo {
     ///     setting made inside a savepoint outlives its `RELEASE`.
     ///   - body: the transactional work, handed a `Repo` bound to the
     ///     transaction's connection.
+    /// - Returns: what `body` returned, once the commit has succeeded.
+    ///   Discardable, so a body run only for its effects needs no `_ =`.
     @discardableResult
     public func transaction<T: Sendable>(
         isolation: IsolationLevel? = nil,
@@ -205,6 +207,8 @@ extension Repo {
     ///   - body: the transactional work, handed a `Repo` bound to the
     ///     transaction's connection. It may run more than once, each time on
     ///     a fresh transaction.
+    /// - Returns: what the attempt that committed returned. Discardable, as
+    ///   in ``transaction(isolation:statementTimeout:_:)``.
     @discardableResult
     public func transaction<T: Sendable>(
         isolation: IsolationLevel? = nil,

@@ -18,6 +18,18 @@ The `tx` handed to the body is a repo bound to the transaction's connection.
 Use it — not the outer repo — for everything inside, or the work runs outside
 the transaction.
 
+Whatever the body returns is the call's result, once the commit has
+succeeded:
+
+```swift
+let saved = try await repo.transaction { tx in
+    try await tx.insert(order)
+}
+```
+
+The result is discardable, so a body run only for its effects needs no
+`_ =` in front of it.
+
 ## Nesting uses savepoints
 
 A `transaction` inside a `transaction` becomes a `SAVEPOINT`, so an inner
@@ -124,7 +136,8 @@ Three properties sort failures the way an HTTP layer answers them:
 ## Binding a repo to a connection you own
 
 A repo normally holds a pool. It can instead be pinned to a single connection
-you manage — the shape a framework uses to bind one to a request scope:
+you manage — the shape a pool that leases a connection per operation uses to
+hand one to its caller:
 
 ```swift
 let repo = Repo(connection: connection)
@@ -163,7 +176,7 @@ let repo = Repo(connection: connection, transactionObserver: TransactionObserver
 
 `began` runs before `BEGIN` is sent, and `ended` runs once `COMMIT` or
 `ROLLBACK` has been answered. Only the outermost transaction is reported, not
-savepoints. A scope that dies in between, or a `ROLLBACK` that fails, leaves
+savepoints. A task that dies in between, or a `ROLLBACK` that fails, leaves
 the owner with `began` and no `ended`. That is the connection to roll back
 or discard.
 

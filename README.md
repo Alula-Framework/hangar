@@ -28,7 +28,7 @@ let popular = try await repo.all(
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Alula-Framework/hangar", from: "0.16.1")
+    .package(url: "https://github.com/Alula-Framework/hangar.git", from: "0.16.1")
 ]
 ```
 
@@ -377,6 +377,10 @@ diverging is the diagnosis. Returned as the text `psql` shows, deliberately
 unparsed: a plan is something a human reads, and a structured form would be
 another thing to keep in step with Postgres across versions.
 
+A raw `SQLFragment` can be explained too. Nothing checks that it is a read:
+`.analyze` on an `UPDATE` or `DELETE` performs it, so explain a write with
+`.plan`.
+
 **Slow-query and N+1 reporting.** Every statement is timed into
 `hangar.query.duration` regardless, but a timer cannot say which query is
 slow. Opt in and it will:
@@ -656,7 +660,9 @@ the fix.
   in its description: the database is probably behind the application's
   migrations.
 
-`alula explain HGR-QUERY-4104` prints a code's page in the terminal.
+`alula explain HGR-QUERY-4104`, from
+[alula-cli](https://github.com/Alula-Framework/alula-cli), prints the link to
+a code's page; the pages live here, not in alula.
 
 ## Column types
 
@@ -736,7 +742,8 @@ filter's unknown field or mistyped value.
 ## Binding a repo to a connection you own
 
 A `Repo` normally holds a pool. It can instead be pinned to a connection you
-manage — which is how a framework binds one to a request scope:
+manage — which is how a pool that leases a connection per operation, such as
+alula-data's `withRepo`, hands one to its caller:
 
 ```swift
 let repo = Repo(connection: connection)
@@ -768,8 +775,9 @@ let repo = Repo(connection: connection, transactionObserver: TransactionObserver
 
 `began` runs before `BEGIN` is sent, and `ended` runs once `COMMIT` or
 `ROLLBACK` has been answered. Savepoints are not reported. A connection left
-with `began` and no `ended` (the scope died, or `ROLLBACK` failed) is the one
-to roll back or discard.
+with `began` and no `ended` (the task died, or `ROLLBACK` failed) is the one
+to roll back or discard. alula-data's pools do exactly that; see its
+[operations guide](https://github.com/Alula-Framework/alula-data/blob/main/Docs/operations.md#transactions-and-the-connection).
 
 ## Starting from a database you already have
 
@@ -902,7 +910,9 @@ entity's columns, so narrowing belongs on the reference side, not the body.
 
 ## What is not here
 
-No migrations — use a migration tool.
+No migrations — use a migration tool. alula-data's
+[`AlulaMigrate`](https://github.com/Alula-Framework/alula-data/blob/main/Docs/migrate.md)
+is the one built beside Hangar: Postgres-only, one transaction per migration.
 
 ## Documentation
 

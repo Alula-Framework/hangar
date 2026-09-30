@@ -6,10 +6,9 @@ import Changesets
 // results through the closure parameter; everything runs in one
 // transaction, and any failure rolls back all of it.
 
-/// A phantom-typed key naming one step's result — the same technique
-/// `Container.resolve` uses: internally results are `[String: any
-/// Sendable]`, and the key makes the subscript cast safe, so the erasure
-/// never surfaces in user code.
+/// A phantom-typed key naming one step's result. Internally results are
+/// `[String: any Sendable]`; the key carries the value's type, which makes
+/// the subscript's cast safe, so the erasure never surfaces in user code.
 public struct MultiKey<Value: Sendable>: Sendable, CustomStringConvertible {
     /// The key's name — how results are stored and reported.
     public let name: String

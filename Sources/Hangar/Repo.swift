@@ -73,8 +73,8 @@ public struct Repo: Sendable {
     }
 
     /// A repo pinned to one specific connection — for integration layers
-    /// that manage connection lifetime themselves (e.g. Alula's
-    /// request-scoped connections, the design). Every statement runs on
+    /// that manage connection lifetime themselves (alula-data's pools build
+    /// one per lease, in `withRepo`). Every statement runs on
     /// this connection; `transaction { }` issues `BEGIN`/`COMMIT` on it
     /// (nesting becomes savepoints as usual), and there is no replica
     /// routing — the connection *is* the destination.
@@ -99,9 +99,8 @@ public struct Repo: Sendable {
     ///     so work the caller intended to roll back becomes durable.
     ///
     ///     Pass `true` when handing a connection to this repo from inside an
-    ///     open transaction, as a framework integration binding a
-    ///     request-scoped connection does. `transaction { }` then nests as a
-    ///     savepoint, which is what it should have been.
+    ///     open transaction the caller began itself. `transaction { }` then
+    ///     nests as a savepoint, which is what it should have been.
     ///   - transactionObserver: Told when this repo opens and closes an
     ///     outermost transaction on `connection` — for a pool that must not
     ///     hand the connection on while one is open. See

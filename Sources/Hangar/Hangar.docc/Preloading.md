@@ -52,8 +52,15 @@ Post.all.preload(\.files) { $0.withDeleted() }
 ## Preloading through a join
 
 Preloads run after the parent rows decode, so they work on any read whose
-result is the base entity — including a join. `Query.join` carries them
-across the conversion, and ``QueryBuilder`` has the same `preload` surface:
+result is the base entity — including a join. They apply to the base
+entity, and `Query.join` carries them across the conversion:
+
+```swift
+Post.join(Comment.self, on: { p, c in c.postID == p.id })
+    .preload(\.author)
+```
+
+``QueryBuilder`` has the same `preload` surface:
 
 ```swift
 Post.query { q, post in
@@ -164,12 +171,3 @@ the related entity's; the related key follows the `\Related.id` convention.
 At the call site `.preload(\.tags)` is identical to a direct has-many.
 Duplicate join rows yield duplicate children — the data's truth — and a
 join row referencing a vanished child is skipped.
-
-## Preloading through a join
-
-Preloads survive composition into a join, and apply to the base entity:
-
-```swift
-Post.join(Comment.self, on: { p, c in c.postID == p.id })
-    .preload(\.author)
-```
