@@ -34,6 +34,12 @@ dependencies: [
 
 Requires Swift 6.2+. Linux and macOS 15+.
 
+Hangar knows nothing of any framework. Two packages own a pool and hand you
+a `Repo` bound to it: [hangar-vapor](https://github.com/Alula-Framework/hangar-vapor)
+in a Vapor application, and alula-data's
+[`AlulaDataPostgres`](https://github.com/Alula-Framework/alula-data/blob/main/Docs/data-postgres.md)
+in an Alula one.
+
 ## Queries are values
 
 Nothing executes until a `Repo` runs it, so a query can be built in pieces,
