@@ -355,12 +355,14 @@ extension SQLRenderer {
             query.joinedAlias ?? B.schema.name,
             query.thirdAlias ?? C.schema.name,
         ]
-        guard Set(effective).count == 3 else {
-            throw HangarError.invalidProjection(
-                table: A.schema.name,
-                reason:
-                    "the three joined tables must expose distinct names — alias the repeated one: \(A.schema.name).alias(\"a\") ... .join(\(C.schema.name).alias(\"c\"), on: ...)."
-            )
+        let types: [any Table.Type] = [A.self, B.self, C.self]
+        let aliases = [query.baseAlias, query.joinedAlias, query.thirdAlias]
+        for (i, j) in [(0, 1), (0, 2), (1, 2)] where effective[i] == effective[j] {
+            let unaliased = aliases[i] == nil && aliases[j] == nil
+            throw HangarError.joinNeedsAlias(
+                name: effective[i],
+                selfJoin: ObjectIdentifier(types[i]) == ObjectIdentifier(types[j]) && unaliased
+                    ? "\(types[i])" : nil)
         }
         var sql = "FROM \(A.schema.quotedSource)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }

@@ -180,10 +180,7 @@ extension Aliased {
         makeJoin(.inner, base: .aliased(self), other: .plain, condition: condition)
     }
 
-    /// Left join from an aliased base.
-    /// Left-joins another table onto an already-composed query;
-    /// accumulated conditions, ordering, limits, and preloads carry over.
-    /// Left join against an aliased table.
+    /// Left join from an aliased base onto an aliased table.
     public func leftJoin<B: Table>(
         _ other: Aliased<B>,
         on condition: (T.QueryColumns, B.QueryColumns) -> Predicate
@@ -518,12 +515,10 @@ extension SQLRenderer {
         // self-join without aliases.
         let effectiveB = query.joinedSource ?? query.joinedAlias ?? B.schema.name
         guard effectiveA != effectiveB else {
-            throw HangarError.invalidProjection(
-                table: A.schema.name,
-                reason: A.schema.name == B.schema.name
-                    ? "a self-join needs an alias on at least one side: \(A.schema.name).alias(\"parent\").join(\(B.schema.name).alias(\"child\"), on: ...)."
-                    : "both sides of this join are named \"\(effectiveA)\" — give them distinct aliases."
-            )
+            let unaliased =
+                query.baseAlias == nil && query.joinedAlias == nil && query.joinedSource == nil
+            throw HangarError.joinNeedsAlias(
+                name: effectiveA, selfJoin: A.self == B.self && unaliased ? "\(A.self)" : nil)
         }
         var sql = "FROM \(A.schema.quotedSource)"
         if let alias = query.baseAlias { sql += " AS \(quote(alias))" }

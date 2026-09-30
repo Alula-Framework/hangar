@@ -19,7 +19,10 @@ struct RuntimeCodeTests {
         (.bulkWriteClause(table: "t", operation: "delete", clause: "LIMIT"), "HGR-QUERY-4111"),
         (.unknownFilterField(table: "t", field: "f"), "HGR-QUERY-4112"),
         (.invalidFilterValue(table: "t", field: "f"), "HGR-QUERY-4113"),
+        (.explainAnalyzeWrite, "HGR-QUERY-4115"),
         (.rowLockOnSetOperation(table: "t"), "HGR-QUERY-4005"),
+        (.joinNeedsAlias(name: "t", selfJoin: "T"), "HGR-QUERY-4007"),
+        (.joinNeedsAlias(name: "t", selfJoin: nil), "HGR-QUERY-4007"),
     ]
 
     @Test("each coded error leads with its code and ends with its page")

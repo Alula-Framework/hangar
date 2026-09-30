@@ -4,6 +4,34 @@ All notable changes are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`explain` no longer performs a write.** `EXPLAIN ANALYZE` executes what
+  it explains, and the `SQLFragment` overload accepted anything — a
+  data-modifying `WITH` or a `SELECT … INTO` given `.analyze` ran, and so
+  did a raw write CTE inside a typed query. `.analyze` of a statement that
+  may write now throws `HangarError.explainAnalyzeWrite`
+  (`HGR-QUERY-4115`) before anything is sent; the page shows how to measure
+  a write inside a transaction you roll back. A read is `SELECT`, `VALUES`,
+  `TABLE`, or a `WITH` with no `INSERT`, `UPDATE`, `DELETE` or `MERGE`, after
+  any leading comments; anything unsure counts as a write.
+- **A write fragment can be explained with `.plan`.** The fragment was
+  rendered in parentheses, so `EXPLAIN (DELETE …)` was a syntax error. Its
+  plan now comes from the primary: explaining routed as a read, so on a repo
+  with a replica, outside a transaction, a write went to the replica. A
+  typed query with a row lock is planned on the primary too, as `all` runs
+  it.
+- **An unaliased self-join says so.** It threw `invalidProjection`, which
+  read "Projection on …", and suggested `employees.alias(...)`, the table
+  rather than the type. It now throws `HangarError.joinNeedsAlias`
+  (`HGR-QUERY-4007`, with a page): "This joins Employee to itself, and a
+  self-join needs an alias on at least one side", with the fix written as
+  `Employee.alias("parent").join(Employee.alias("child"), on: ...)`. Two
+  aliases that collide, and a repeated name in a three-table join, throw it
+  too.
+
 ## [0.16.1] - 2026-09-28
 
 ### Fixed

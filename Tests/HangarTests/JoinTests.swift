@@ -63,8 +63,13 @@ struct JoinRendererTests {
         do {
             _ = try SQLRenderer.select(Post.join(Post.self, on: { a, b in a.id == b.id }))
         } catch let error as HangarError {
-            // The refusal now names the remedy, not a missing feature.
-            #expect(error.description.contains("alias"))
+            // Says it is a self-join, and names the remedy in the Swift the
+            // caller writes — the type, not the table.
+            #expect(error.code == "HGR-QUERY-4007")
+            #expect(error.description.contains("This joins Post to itself, and a self-join needs an alias"))
+            #expect(error.description.contains(#"Post.alias("parent").join(Post.alias("child"), on: ...)"#))
+            #expect(!error.description.contains("Projection"))
+            #expect(!error.description.contains("hangar_posts.alias"))
         } catch {
             Issue.record("unexpected error type")
         }
@@ -100,10 +105,12 @@ struct JoinRendererTests {
 
     @Test("two sides aliased to the same name are refused")
     func collidingAliases() {
-        #expect(throws: HangarError.self) {
+        let error = #expect(throws: HangarError.self) {
             _ = try SQLRenderer.select(
                 Post.alias("p").join(Comment.alias("p"), on: { p, c in c.postID == p.id }))
         }
+        #expect(error?.code == "HGR-QUERY-4007")
+        #expect(error?.description.contains(#"Two sides of this join are both named "p""#) == true)
     }
 
     @Test("an alias on an ordinary two-table join is allowed, not just tolerated")

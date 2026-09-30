@@ -228,9 +228,10 @@ Employee.alias("manager").join(Employee.alias("report"),
     on: { manager, report in report.managerID == manager.id })
 ```
 
-An unaliased self-join is refused with the remedy named — every column
-reference would be ambiguous — and composition closures after an aliased
-join see alias-qualified columns throughout.
+An unaliased self-join is refused when it runs, with `HGR-QUERY-4007` and
+the remedy written in your type — every column reference would be
+ambiguous — and composition closures after an aliased join see
+alias-qualified columns throughout.
 
 A third table joins on from any two-table join, the closure seeing all
 three column sets:
@@ -383,9 +384,12 @@ diverging is the diagnosis. Returned as the text `psql` shows, deliberately
 unparsed: a plan is something a human reads, and a structured form would be
 another thing to keep in step with Postgres across versions.
 
-A raw `SQLFragment` can be explained too. Nothing checks that it is a read:
-`.analyze` on an `UPDATE` or `DELETE` performs it, so explain a write with
-`.plan`.
+A raw `SQLFragment` can be explained too, a write included; a write's plan
+comes from the primary, never a read replica. `.analyze` executes what it
+explains, so it is refused for anything that may write — `HGR-QUERY-4115`,
+before anything is sent. A read is `SELECT`, `VALUES`, `TABLE`, or a `WITH`
+with no `INSERT`, `UPDATE`, `DELETE` or `MERGE` in it; the page shows how to
+measure a write inside a transaction you roll back.
 
 **Slow-query and N+1 reporting.** Every statement is timed into
 `hangar.query.duration` regardless, but a timer cannot say which query is
@@ -633,10 +637,13 @@ in [`Diagnostics/`](Diagnostics/), which says why Postgres refuses it and how
 to write the query instead. The same check fails if a code is declared but
 never produced, or has no page.
 
-One mistake cannot be a build error without splitting every query type in
-two: a row lock combined with `UNION`, `INTERSECT` or `EXCEPT`. Running such a
-query throws `HangarError.rowLockOnSetOperation` — `HGR-QUERY-4005` — before
-anything is sent.
+Two mistakes cannot be build errors. A row lock combined with `UNION`,
+`INTERSECT` or `EXCEPT` could only be one by splitting every query type in
+two; running such a query throws `HangarError.rowLockOnSetOperation` —
+`HGR-QUERY-4005` — before anything is sent. A join whose two sides have the
+same name, usually a self-join with no alias, cannot be one because a type
+cannot require two generic parameters to differ; it throws
+`HangarError.joinNeedsAlias` — `HGR-QUERY-4007`.
 
 ## Diagnostics
 
@@ -645,13 +652,14 @@ code has a page in [`Diagnostics/`](Diagnostics/) that explains the cause and
 the fix.
 
 - **`40xx` are build errors**: 4001–4004 and 4006, above. The compiler prints
-  the code and the page's URL. The exception is 4005, a query shape that is
-  only caught when it runs.
+  the code and the page's URL. The exceptions are 4005 and 4007, query
+  shapes that are only caught when they run.
 - **`41xx` are raised when a query runs**: `HangarError.code` is
   `HGR-QUERY-4101` to `4113` (transaction aborted, no ambient repo, too many
   rows, stale model, not soft-deletable, column count or decode mismatch,
   unknown enum value, not preloaded, stream outlived its lease, bulk-write
-  clause, unknown filter field, invalid filter value). The description starts
+  clause, unknown filter field, invalid filter value), and `4115` (`EXPLAIN
+  ANALYZE` of a statement that may write). The description starts
   with the code and ends with the page's URL:
 
   ```

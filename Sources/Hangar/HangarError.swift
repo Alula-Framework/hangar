@@ -127,6 +127,19 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// on one of its branches. Postgres refuses both.
     case rowLockOnSetOperation(table: String)
 
+    /// `explain(_:mode:)` with `.analyze` was given a statement that may
+    /// write. `EXPLAIN ANALYZE` executes what it explains, so it is refused
+    /// before anything is sent rather than performed. Only `SELECT`,
+    /// `VALUES`, `TABLE` and a `WITH` with no data-modifying statement in it
+    /// count as reads; see `Repo.explain(_:mode:)`.
+    case explainAnalyzeWrite
+
+    /// Both sides of a join expose the same name, so every column reference
+    /// in the statement would be ambiguous. `selfJoin` is the Swift type when
+    /// a table is joined to itself with no alias to tell the sides apart;
+    /// `nil` when two aliases collide.
+    case joinNeedsAlias(name: String, selfJoin: String?)
+
     /// Hangar's code for ``rowLockOnSetOperation(table:)``, with a page in
     /// Hangar's `Diagnostics/`.
     static let rowLockOnSetOperationCode = "HGR-QUERY-4005"
@@ -137,8 +150,8 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
     /// something to look up.
     ///
     /// Codes raised when a query runs are `HGR-QUERY-41xx`; the `40xx` codes
-    /// are build errors, except `HGR-QUERY-4005`, a query shape Hangar can
-    /// only catch when the query runs.
+    /// are build errors, except `HGR-QUERY-4005` and `HGR-QUERY-4007`, query
+    /// shapes Hangar can only catch when the query runs.
     public var code: String? {
         switch self {
         case .transactionAborted: "HGR-QUERY-4101"
@@ -154,7 +167,9 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
         case .bulkWriteClause: "HGR-QUERY-4111"
         case .unknownFilterField: "HGR-QUERY-4112"
         case .invalidFilterValue: "HGR-QUERY-4113"
+        case .explainAnalyzeWrite: "HGR-QUERY-4115"
         case .rowLockOnSetOperation: Self.rowLockOnSetOperationCode
+        case .joinNeedsAlias: "HGR-QUERY-4007"
         default: nil
         }
     }
@@ -257,6 +272,15 @@ public enum HangarError: Error, Sendable, CustomStringConvertible {
                 "Internal error: entity \"\(table)\" has no binding for column \"\(column)\". This is a Hangar bug."
         case .invalidConflictClause(let table, let reason):
             return "ON CONFLICT on \"\(table)\": \(reason)."
+        case .explainAnalyzeWrite:
+            return
+                "EXPLAIN ANALYZE runs the statement it explains, and this one may write — it is not a SELECT, VALUES, TABLE, or a WITH free of INSERT, UPDATE, DELETE and MERGE — so explain refused it rather than perform it. Use mode: .plan for the plan alone. To measure the write, run EXPLAIN ANALYZE through repo.execute inside a transaction { } that throws RollbackError.intentional, so the write is rolled back."
+        case .joinNeedsAlias(let name, let type?):
+            return
+                "This joins \(type) to itself, and a self-join needs an alias on at least one side: both sides are named \"\(name)\", so every column would be ambiguous. Write \(type).alias(\"parent\").join(\(type).alias(\"child\"), on: ...)."
+        case .joinNeedsAlias(let name, nil):
+            return
+                "Two sides of this join are both named \"\(name)\", so every column would be ambiguous. Give them distinct aliases."
         case .rowLockOnSetOperation(let table):
             return
                 "A row lock on \"\(table)\" was combined with UNION, INTERSECT or EXCEPT, which Postgres refuses (\"FOR UPDATE is not allowed with UNION/INTERSECT/EXCEPT\"). Lock the rows in a separate statement in the same transaction — select their ids with the lock, then run the combined query."

@@ -47,11 +47,13 @@ struct ThreeTableRendererTests {
 
     @Test("three tables with a repeated name need an alias, and the guard says so")
     func threeWayAmbiguityGuard() throws {
-        #expect(throws: HangarError.self) {
+        let error = #expect(throws: HangarError.self) {
             _ = try SQLRenderer.select(
                 Post.join(Comment.self, on: { p, c in c.postID == p.id })
                     .join(Post.self, on: { p, _, other in other.authorID == p.authorID }))
         }
+        #expect(error?.code == "HGR-QUERY-4007")
+        #expect(error?.description.contains("This joins Post to itself") == true)
         // Aliased, the same shape renders.
         let statement = try SQLRenderer.select(
             Post.join(Comment.self, on: { p, c in c.postID == p.id })

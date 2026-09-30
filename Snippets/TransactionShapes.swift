@@ -1,5 +1,6 @@
-// The README's transaction, bulk-write and upsert examples, as code the
-// build compiles.
+// The README's transaction, bulk-write and upsert examples, and the
+// HGR-QUERY-4115 page's rolled-back EXPLAIN ANALYZE, as code the build
+// compiles.
 //
 // A README that shows an API is a claim about that API. These are the shapes
 // the README's Transactions, Row locks, Bulk writes and Upserts paragraphs
@@ -153,4 +154,20 @@ func bulkAndUpsertShapes(repo: Repo, names: [String], users: [SnippetUser], docs
     _ = try await repo.insert(
         changeset, onConflict: .doUpdate(target: [\SnippetUser.email], set: [\SnippetUser.name]))
     _ = try await repo.insert(changeset, onConflict: .doNothing)
+}
+
+func explainWriteShape(repo: Repo, cutoff: Date) async throws {
+    // HGR-QUERY-4115's page: measure a write with EXPLAIN ANALYZE inside a
+    // transaction that rolls it back.
+    do {
+        try await repo.transaction { tx in
+            let rows = try await tx.execute(
+                "EXPLAIN (ANALYZE, BUFFERS) DELETE FROM \(raw: "orders") WHERE placed_at < \(cutoff)")
+            var plan: [String] = []
+            for try await line in rows.decode(String.self) { plan.append(line) }
+            throw RollbackError.intentional(plan.joined(separator: "\n"))
+        }
+    } catch RollbackError.intentional(let plan) {
+        print(plan)  // the DELETE ran, and was rolled back
+    }
 }
